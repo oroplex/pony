@@ -7,6 +7,9 @@ import { defaultStatePath } from "@pony/client/listen";
 
 import { createPonyMcp, listenMcp } from "./server.ts";
 
+declare const __PONY_MCP_VERSION__: string | undefined;
+const PONY_MCP_VERSION = typeof __PONY_MCP_VERSION__ === "string" ? __PONY_MCP_VERSION__ : "dev";
+
 const { values } = parseArgs({
   options: {
     http: { type: "string" },
@@ -14,9 +17,34 @@ const { values } = parseArgs({
     client: { type: "string" },
     listen: { type: "boolean" },
     state: { type: "string" },
+    help: { type: "boolean", short: "h" },
+    version: { type: "boolean", short: "v" },
   },
   strict: true,
 });
+
+if (values.version) {
+  console.log(PONY_MCP_VERSION);
+  process.exit(0);
+}
+
+if (values.help) {
+  console.log(`pony-mcp ${PONY_MCP_VERSION}: MCP server for the Pony Android app
+
+Usage: pony-mcp [options]
+
+Runs over stdio by default.
+
+Options:
+  --listen          keep the pairing and accept asks from the phone (PONY_LISTEN=1)
+  --http <port>     serve streamable HTTP on 127.0.0.1 instead of stdio
+  --relay <url>     relay URL (PONY_RELAY, default ${DEFAULT_RELAY})
+  --client <name>   name shown on the phone (PONY_CLIENT_NAME)
+  --state <path>    pairing file for listen mode (PONY_STATE)
+  -h, --help        show this help
+  -v, --version     print the version`);
+  process.exit(0);
+}
 
 const relayHttp = values.relay ?? process.env.PONY_RELAY ?? DEFAULT_RELAY;
 const clientName = values.client ?? process.env.PONY_CLIENT_NAME ?? "Grok Bot";

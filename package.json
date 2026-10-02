@@ -16,7 +16,7 @@
     "demo": "npm run demo -w @pony/client",
     "pair": "npm run pair -w @pony/client --",
     "listen": "npm run listen -w @pony/client --",
-    "mcp": "npm run start -w @pony/mcp --",
+    "mcp": "npm run start -w pony-mcp --",
     "typecheck": "tsc -p tsconfig.json"
   }
 }
