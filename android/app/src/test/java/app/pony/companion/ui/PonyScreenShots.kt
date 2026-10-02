@@ -411,7 +411,8 @@ class PonyScreenShots {
 
     @OptIn(ExperimentalRoborazziApi::class)
     private fun shot(name: String, dark: Boolean = true, fontScale: Float = 1f, content: @Composable () -> Unit) {
-        val dir = File("/opt/cursor/artifacts/screenshots").apply { mkdirs() }
+        // build.gradle.kts sets roborazzi.output.dir (PONY_SCREENSHOTS, or build/outputs/roborazzi).
+        val dir = File(System.getProperty("roborazzi.output.dir") ?: "build/outputs/roborazzi").apply { mkdirs() }
         captureRoboImage(
             file = File(dir, "$name.png"),
             roborazziOptions = RoborazziOptions(taskType = RoborazziTaskType.Record),
