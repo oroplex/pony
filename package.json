@@ -1,0 +1,22 @@
+{
+  "name": "pony-companion",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "workspaces": [
+    "shared",
+    "relay",
+    "client",
+    "packages/mcp",
+    "web"
+  ],
+  "scripts": {
+    "test": "npm test --workspaces --if-present",
+    "relay": "npm run start -w @pony/relay --",
+    "demo": "npm run demo -w @pony/client",
+    "pair": "npm run pair -w @pony/client --",
+    "listen": "npm run listen -w @pony/client --",
+    "mcp": "npm run start -w @pony/mcp --",
+    "typecheck": "tsc -p tsconfig.json"
+  }
+}

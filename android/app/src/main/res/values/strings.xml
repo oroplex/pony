@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Pony Companion</string>
+    <string name="a11y_label">Pony control</string>
+    <string name="a11y_description">Lets your own assistant read on-screen text and perform taps, swipes, and typing that you start. Pony asks before sending, paying, buying, deleting, calling, or changing security settings. Password fields are hidden and cannot be typed into. Pony watches for call screens only so it never touches them, and it waits for pop-ups to move instead of tapping them. Pony does not read the clipboard unless you turn that on, and it does not act while you are disconnected.</string>
+    <string name="ime_label">Pony keyboard</string>
+    <string name="ime_subtype">Pony</string>
+    <string name="notif_channel">Pony session</string>
+    <string name="notif_title">Pony is connected</string>
+    <string name="notif_text">Your assistant can see and control this phone. Tap Disconnect to stop.</string>
+    <string name="notif_disconnect">Disconnect</string>
+    <string name="widget_hint">Ask Pony</string>
+    <string name="widget_description">Start a voice ask without opening Pony.</string>
+    <string name="tile_label">Ask Pony</string>
+</resources>

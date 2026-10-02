@@ -1,0 +1,37 @@
+{
+  "name": "@pony/client",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/session.ts",
+    "./session": "./src/session.ts",
+    "./listen": "./src/listen.ts",
+    "./mock-phone": "./src/mock-phone.ts"
+  },
+  "bin": {
+    "pony-phone": "./src/cli.ts"
+  },
+  "scripts": {
+    "pair": "tsx src/cli.ts pair",
+    "listen": "tsx src/cli.ts listen",
+    "demo": "tsx src/demo.ts",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@pony/shared": "0.1.0",
+    "commander": "^13.1.0",
+    "qrcode": "^1.5.4",
+    "qrcode-terminal": "^0.12.0",
+    "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.21",
+    "@types/qrcode": "^1.5.5",
+    "@types/ws": "^8.18.1",
+    "tsx": "^4.19.4",
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.4"
+  }
+}

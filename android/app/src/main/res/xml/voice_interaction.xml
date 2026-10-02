@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<voice-interaction-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:recognitionService="app.pony.companion.voice.PonyRecognitionService"
+    android:sessionService="app.pony.companion.voice.PonyVoiceSessionService"
+    android:settingsActivity="app.pony.companion.MainActivity"
+    android:supportsAssist="true"
+    android:supportsLaunchVoiceAssistFromKeyguard="true" />

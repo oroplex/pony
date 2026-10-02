@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="pony_canvas">#FFF6F5FB</color>
+    <color name="pony_night">#FF0B0A13</color>
+    <color name="pony_iris">#FF6C4DF6</color>
+    <color name="pony_ink">#FF171522</color>
+    <color name="pony_surface">#FFFFFFFF</color>
+    <color name="pony_iris_soft">#336C4DF6</color>
+</resources>

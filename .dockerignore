@@ -1,0 +1,7 @@
+node_modules
+**/node_modules
+android/.gradle
+android/**/build
+.git
+uploads
+*.apk

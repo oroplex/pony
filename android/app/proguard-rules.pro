@@ -1,0 +1,11 @@
+-keep class app.pony.companion.** { *; }
+-dontwarn com.google.crypto.tink.**
+-keep class com.google.crypto.tink.** { *; }
+-keep class org.vosk.** { *; }
+-keep class com.sun.jna.** { *; }
+-keep class rikka.shizuku.** { *; }
+-keep class app.pony.companion.display.PonyDisplayUserService { *; }
+-keep class app.pony.companion.display.IPonyDisplay { *; }
+-keep class app.pony.companion.display.IPonyDisplay$Stub { *; }
+-dontwarn org.vosk.**
+-dontwarn com.sun.jna.**

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.Pony" parent="Theme.Pony.Base">
+        <item name="android:windowSplashScreenBackground">@color/pony_night</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/ic_splash_mark</item>
+        <item name="android:windowSplashScreenIconBackgroundColor">@color/pony_iris</item>
+    </style>
+</resources>

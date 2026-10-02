@@ -1,0 +1,11 @@
+services:
+  relay:
+    build:
+      context: .
+      dockerfile: relay/Dockerfile
+    ports:
+      - "8787:8787"
+    environment:
+      PORT: "8787"
+      # Set this to the URL the phone can reach, if it differs from the Host header.
+      # PONY_RELAY_URL: "wss://relay.pony.karlmagendavid.com"

@@ -1,0 +1,50 @@
+# Node
+node_modules/
+dist/
+*.log
+.npm
+coverage/
+
+# Android
+.gradle/
+**/build/
+local.properties
+*.iml
+.idea/
+.cxx/
+captures/
+.externalNativeBuild/
+*.apk
+*.aab
+*.ap_
+*.dex
+keystore.properties
+signing.properties
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.pem
+*.key
+
+# SDK / tooling (local)
+.android-sdk/
+android-sdk/
+
+# OS / editor
+.DS_Store
+.vscode/
+.cursor/
+*.swp
+
+# Env (keep the documented templates)
+.env
+.env.*
+!.env.example
+!**/.env.example
+
+# Netlify / cloud leftovers
+.netlify/
+
+# Uploads from the agent session
+uploads/

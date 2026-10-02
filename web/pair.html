@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="dark light" />
+    <title>Pair with Pony</title>
+    <style>
+      :root {
+        --bg: #0b0b0f;
+        --card: #16161d;
+        --ink: #f5f5f7;
+        --muted: #a1a1ac;
+        --line: #262630;
+        --accent: #7c5cff;
+        --accent-ink: #ffffff;
+      }
+      @media (prefers-color-scheme: light) {
+        :root {
+          --bg: #f4f4f7;
+          --card: #ffffff;
+          --ink: #16161d;
+          --muted: #5c5c68;
+          --line: #e6e6ec;
+          --accent: #6d4bff;
+        }
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        min-height: 100dvh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+        background: var(--bg);
+        color: var(--ink);
+        font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      }
+      main {
+        width: 100%;
+        max-width: 420px;
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 24px;
+        padding: 28px 24px 24px;
+        box-shadow: 0 24px 60px rgba(0, 0, 0, 0.35);
+      }
+      .mark {
+        width: 56px;
+        height: 56px;
+        border-radius: 16px;
+        background: linear-gradient(140deg, var(--accent), #c56cff);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 30px;
+        margin-bottom: 18px;
+      }
+      h1 {
+        font-size: 22px;
+        margin: 0 0 6px;
+      }
+      p {
+        margin: 0 0 16px;
+        color: var(--muted);
+      }
+      a.button {
+        display: block;
+        text-align: center;
+        text-decoration: none;
+        font-weight: 600;
+        padding: 15px 18px;
+        border-radius: 14px;
+        background: var(--accent);
+        color: var(--accent-ink);
+        margin-bottom: 12px;
+      }
+      a.ghost {
+        background: transparent;
+        color: var(--ink);
+        border: 1px solid var(--line);
+      }
+      .safety {
+        margin-top: 20px;
+        padding: 14px 16px;
+        border-radius: 14px;
+        border: 1px solid var(--line);
+        background: color-mix(in srgb, var(--accent) 10%, transparent);
+        font-size: 14px;
+        color: var(--ink);
+      }
+      .safety strong {
+        display: block;
+        margin-bottom: 4px;
+      }
+      .hidden {
+        display: none !important;
+      }
+      footer {
+        margin-top: 18px;
+        font-size: 13px;
+        color: var(--muted);
+        text-align: center;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="mark" aria-hidden="true">&#129412;</div>
+
+      <div id="ready">
+        <h1>Open this in Pony</h1>
+        <p>Tap below to hand this pairing to the Pony app on this phone. The code expires 15 minutes after it was made.</p>
+        <a class="button" id="open" href="#">Open in Pony</a>
+        <a class="button ghost" id="backup" href="#">Use the pony:// link instead</a>
+        <div class="safety">
+          <strong>Check the safety code</strong>
+          Once Pony opens, make sure the short safety code it shows matches the one on the device that created this link. If they differ, decline and pair again.
+        </div>
+      </div>
+
+      <div id="empty" class="hidden">
+        <h1>Nothing to pair</h1>
+        <p>This page needs a pairing link created by your assistant. Run <em>pair</em> again, then open the fresh link on this phone — or scan the QR with Pony.</p>
+      </div>
+
+      <div id="expired" class="hidden">
+        <h1>This pairing link expired</h1>
+        <p>Ask for a new one: run <em>pair</em> again, then open the fresh link on this phone — or scan the QR with Pony.</p>
+      </div>
+
+      <footer>Pony Companion &middot; end-to-end encrypted pairing</footer>
+    </main>
+
+    <script type="module">
+      import { readLocationParams, readLocationExp, intentUrl, backupLink, hasPairing, isExpired } from "./pair.js";
+
+      const fields = readLocationParams(location);
+      const ready = document.getElementById("ready");
+      const empty = document.getElementById("empty");
+      const expired = document.getElementById("expired");
+
+      if (!hasPairing(fields)) {
+        ready.classList.add("hidden");
+        empty.classList.remove("hidden");
+      } else if (isExpired(readLocationExp(location))) {
+        ready.classList.add("hidden");
+        expired.classList.remove("hidden");
+      } else {
+        const open = document.getElementById("open");
+        const backup = document.getElementById("backup");
+        open.href = intentUrl(fields);
+        backup.href = backupLink(fields);
+      }
+    </script>
+  </body>
+</html>

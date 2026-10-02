@@ -1,0 +1,16 @@
+{
+  "name": "@pony/web",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@pony/shared": "0.1.0"
+  },
+  "devDependencies": {
+    "vitest": "^3.2.4"
+  }
+}

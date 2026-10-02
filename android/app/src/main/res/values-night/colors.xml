@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="pony_ink">#FFF4F3FA</color>
+    <color name="pony_surface">#FF171527</color>
+    <color name="pony_iris_soft">#556C4DF6</color>
+</resources>
