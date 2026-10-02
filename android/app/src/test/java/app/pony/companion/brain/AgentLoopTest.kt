@@ -151,21 +151,21 @@ class AgentLoopTest {
             model = StepModel { messages ->
                 rounds++
                 if (rounds == 1) {
-                    ModelTurn(calls = listOf(ToolCall("q", "ask", mapOf("text" to "Which Ben — Ben Cohen or Ben Lee?"))))
+                    ModelTurn(calls = listOf(ToolCall("q", "ask", mapOf("text" to "Which Sam — Sam Rivera or Sam Lee?"))))
                 } else {
-                    assertTrue(messages.any { it.text.contains("The owner said: Ben Lee") })
-                    ModelTurn(calls = listOf(ToolCall("d", "done", mapOf("text" to "Texted Ben Lee."))))
+                    assertTrue(messages.any { it.text.contains("The owner said: Sam Lee") })
+                    ModelTurn(calls = listOf(ToolCall("d", "done", mapOf("text" to "Texted Sam Lee."))))
                 }
             },
             execute = { error("ask must not reach execute") },
             guard = { Guard.Allow },
             confirm = { true },
-            ask = { question -> asked += question; "Ben Lee" },
+            ask = { question -> asked += question; "Sam Lee" },
         )
-        val result = loop.run("text ben")
+        val result = loop.run("text sam")
         assertEquals("done", result.status)
-        assertEquals("Texted Ben Lee.", result.message)
-        assertEquals("Which Ben — Ben Cohen or Ben Lee?", asked.single())
+        assertEquals("Texted Sam Lee.", result.message)
+        assertEquals("Which Sam — Sam Rivera or Sam Lee?", asked.single())
         assertEquals(1, result.steps)
     }
 
@@ -187,7 +187,7 @@ class AgentLoopTest {
             confirm = { true },
             ask = { "" },
         )
-        val result = loop.run("text ben")
+        val result = loop.run("text sam")
         assertEquals("done", result.status)
         assertEquals(1, result.steps)
     }
@@ -211,7 +211,7 @@ class AgentLoopTest {
         // Settings changes don't need a confirmation; only the risky verbs do.
         assertTrue(prompt.contains("needs no confirmation"))
         assertFalse(prompt.contains("changes security settings"))
-        // An ambiguous target (several contacts named Ben) asks instead of guessing.
+        // An ambiguous target (several contacts named Sam) asks instead of guessing.
         assertTrue(prompt.contains("don't guess"))
         assertTrue(prompt.contains("ask tool"))
         // Worth-keeping facts are remembered; secrets never.
