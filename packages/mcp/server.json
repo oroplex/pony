@@ -1,0 +1,49 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.oroplex/pony",
+  "description": "MCP server that lets an AI assistant see and drive your Android phone through the Pony app",
+  "repository": {
+    "url": "https://github.com/oroplex/pony",
+    "source": "github",
+    "subfolder": "packages/mcp"
+  },
+  "version": "0.6.2",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "pony-mcp",
+      "version": "0.6.2",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "PONY_LISTEN",
+          "description": "Set to 1 to keep the phone pairing and accept asks typed or spoken on the phone",
+          "isRequired": false,
+          "format": "string"
+        },
+        {
+          "name": "PONY_RELAY",
+          "description": "Relay URL (default https://relay.pony.karlmagendavid.com)",
+          "isRequired": false,
+          "format": "string"
+        },
+        {
+          "name": "PONY_CLIENT_NAME",
+          "description": "Assistant name shown on the phone",
+          "isRequired": false,
+          "format": "string"
+        },
+        {
+          "name": "PONY_STATE",
+          "description": "Path of the pairing file used in listen mode",
+          "isRequired": false,
+          "format": "string"
+        }
+      ]
+    }
+  ],
+  "title": "Pony",
+  "websiteUrl": "https://pony.karlmagendavid.com"
+}
