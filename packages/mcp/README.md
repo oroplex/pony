@@ -2,7 +2,9 @@
 
 MCP server for [Pony](https://pony.karlmagendavid.com): it lets an AI assistant see and drive your Android phone through the Pony app, over an end-to-end encrypted relay.
 
-You need the Pony app on an Android 11+ phone (see the [project README](https://github.com/oroplex/pony#install-and-pair)) and Node.js 20+.
+You need the Pony app on an Android 11+ phone (see the [project README](https://github.com/oroplex/pony#install)) and Node.js 20+.
+
+> **Not on npm yet.** Until `pony-mcp` is published, run it from a clone (see [MCP setup](https://github.com/oroplex/pony#mcp-setup)). The `npx` commands below work once it's live.
 
 ## Use with an MCP host (stdio)
 
