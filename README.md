@@ -7,7 +7,8 @@ Pony is a harness for your Android phone. Claude, Grok, Gemini, OpenAI, or any M
 The agent never needs a vendor SDK. Pony shares the screen, reads the UI tree, and performs the gestures. You choose which model — or which MCP host — is in charge.
 
 - **Site:** [pony.karlmagendavid.com](https://pony.karlmagendavid.com)
-- **APK:** [download.pony.karlmagendavid.com](https://download.pony.karlmagendavid.com)
+- **APK:** [pony-latest.apk](https://download.pony.karlmagendavid.com/pony-latest.apk) (0.6.2, SHA-256 `c64f123b24b8969474ebc117664dbbc4b0420eaa139030fd7b468c5660b697a6`). [latest.json](https://download.pony.karlmagendavid.com/latest.json) always lists the current version and its SHA-256.
+- **Code:** [github.com/oroplex/pony](https://github.com/oroplex/pony)
 - **This tree:** 0.6.2 (versionCode 9), MIT licensed
 
 ## What it is
@@ -24,25 +25,56 @@ Pony can:
 
 On the phone you can also run a key-based brain (Claude, Gemini, OpenAI, xAI Grok, OpenRouter, or any OpenAI-compatible endpoint). Keys stay on the device, sealed by the Android Keystore. Assistants never see them.
 
+## Three ways to connect a brain
+
+Pick whichever fits. The phone side is the same app in every case.
+
+| Brain | What you need | Computer? |
+| --- | --- | --- |
+| **Your own API key, on the phone**: Claude, OpenAI, Gemini, or xAI Grok (OpenRouter and any OpenAI-compatible endpoint under Advanced) | A key from that provider | No. The agent loop runs on the phone. |
+| **Any MCP host**: Claude Desktop, Claude Code, Cursor, and others | The Pony MCP server ([below](#mcp-setup)) | Yes, Node.js 20+ |
+| **Grok Bot**, through the [Pony template](https://x.ai/bot/Kh1wQPniQK4R2l9k3XE1L) | A Grok Bot account. No API key. | No |
+
 The default relay is Pony Cloud at `https://relay.pony.karlmagendavid.com`. A private relay — including Tailscale or your own machine — is a first-class choice. End-to-end encryption stays on in every mode.
 
 ## Requirements
 
 - An Android phone on **Android 11** or newer
-- **Optional:** [Shizuku](https://shizuku.rikka.app/) if you want Pony to run *other* apps on the hidden screen. Without it, Android will only place Pony's own activities there; everything else may bounce to your display (Pony asks first).
-- A computer with **Node.js 20+** to run the MCP server (or the `pony-phone` CLI)
+- **Optional:** [Shizuku](https://shizuku.rikka.app/) if you want Pony to run *other* apps on the hidden screen. Without it, Android will only place Pony's own activities there; everything else, system apps included, bounces to your display (Pony asks first).
+- **Node.js 20+** only if you run the MCP server or the `pony-phone` CLI yourself. A key on the phone or the Grok Bot template needs no computer.
 
 Distribution is a sideloaded APK, not Google Play. See [PLAY_POLICY.md](PLAY_POLICY.md).
 
-## Install and pair
+## Install
 
-1. Download the APK from [download.pony.karlmagendavid.com](https://download.pony.karlmagendavid.com) and install it.
-2. On Android 13 and newer, open **App info → Allow restricted settings** so the Pony accessibility switch can move.
-3. Walk the four onboarding screens, turn on the Pony control, and run the first task (Pony opens Calculator and adds 2 + 2).
-4. On your computer, start the MCP server (below). The assistant calls `pair` and shows a QR or a `pony://pair` link.
-5. Scan the QR, or tap the one-tap `https://download.pony.karlmagendavid.com/pair…` link on the phone. Compare the six-digit safety code and tap **It matches**. Accept screen sharing (**Share entire screen**).
+1. On the phone, download [pony-latest.apk](https://download.pony.karlmagendavid.com/pony-latest.apk) and open it. If Android asks, allow your browser to install unknown apps. (Optional: check the file against the SHA-256 above.)
+2. Open Pony, read what it does, and agree to the privacy promise.
+3. Turn on **Pony control** in **Settings › Accessibility**. On Android 13 and newer the switch may be greyed out: first open Pony's **App info**, tap the **⋮** menu, and choose **Allow restricted settings**.
+4. Run the first task if you like (Pony opens Calculator and adds 2 + 2).
 
-A pairing token lasts 15 minutes. After that, the server remembers the pairing (`~/.pony/mcp.json`) and rejoins on start.
+## Pair a brain
+
+A key on the phone needs no pairing. For an MCP host or Grok Bot, the quickest way to pair is a one-tap `https://download.pony.karlmagendavid.com/pair…` link: open it on the phone and it hands the pairing to Pony. The QR is the fallback when the link is on another screen: scan it (**Scan code** on Pony's pairing screen), or paste the link (**Paste link**). Either way, compare the six-digit safety code on both sides, tap **It matches**, and accept screen sharing (**Share entire screen**). A pairing token lasts 15 minutes.
+
+**Your own key (no computer)**
+
+1. In Pony, tap **Connect** (or **Settings › Brain**) and pick Claude, OpenAI, Gemini, or xAI Grok.
+2. Tap **Get your … API key** to open the provider's key page, then paste the key.
+3. Tap **Test & Save**. Pony checks the key with a quick call before saving it. The key is sealed by the Android Keystore and never leaves the phone except to reach the provider you picked.
+
+**Any MCP host**
+
+1. On your computer, start the MCP server ([MCP setup](#mcp-setup)) and add it to your host.
+2. Ask the assistant to pair. It calls `pair`, which returns the one-tap link (`pairPageLink`), a `pony://pair` link, and a QR image.
+3. Open the link on the phone, or scan the QR. Compare the safety code, tap **It matches**, and share the screen.
+
+In listen mode the server remembers the pairing (`~/.pony/mcp.json`) and rejoins on start.
+
+**Grok Bot**
+
+1. Start the [Pony template](https://x.ai/bot/Kh1wQPniQK4R2l9k3XE1L) in Grok Bot. It explains what Pony can see and waits for your OK.
+2. Grok Bot sends a pairing link (and a QR as a fallback). Tap the link on the phone.
+3. Compare the safety code, tap **It matches**, and share the screen.
 
 ## MCP setup
 
@@ -85,6 +117,15 @@ Pony is allowed to drive the phone. It is not allowed to be reckless.
 - **Stop** ends the current task. The session stays up.
 - API keys for on-phone brains never leave the device.
 - Plain `http`/`ws` is allowed only for localhost, Tailscale (`100.64.0.0/10`), and private LAN ranges. Everything else must be `https`/`wss`.
+
+## Limits
+
+- **Other apps on the hidden screen need [Shizuku](https://shizuku.rikka.app/).** Without it Android lets Pony place only its own screens on the hidden display; every other app, system apps included, bounces to your screen, and by default Pony asks before using it.
+- **Banking and other secure apps refuse.** They keep themselves off the hidden screen and block screenshots, even with Shizuku.
+- **DRM video shows black.** Protected video (Netflix and the like) renders black off-screen.
+- **A locked phone must be unlocked.** Pony never dismisses or bypasses the lock screen. It asks you to unlock and waits.
+
+App-by-app detail: [docs/hidden-display-apps.md](docs/hidden-display-apps.md).
 
 ## Build from source
 
