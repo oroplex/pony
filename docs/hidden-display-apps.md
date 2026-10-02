@@ -14,11 +14,14 @@ you see is always the real one.
 ## The two modes
 
 **Default — app‑owned display.** With no extra setup Pony creates a normal
-app‑owned `VirtualDisplay`. Android's window manager refuses to place most
-*other* apps' activities on an untrusted display, so this mode is best for
-reading the screen and for the subset of apps the system is willing to host
-off‑screen. Many apps bounce back to the main screen; Pony detects that and
-asks before using it.
+app‑owned `VirtualDisplay`. Android lets a normal app place only **its own**
+activities there: a foreign activity may start only on a *trusted* display,
+and only a holder of the privileged `ADD_TRUSTED_DISPLAY` permission can make
+one. So on a stock phone every other app, system apps like Settings and
+Calculator included, bounces back to the main screen. This mode is good for
+Pony's own screens and little else; Pony detects the bounce and asks before
+using your screen. (Pony still requests a trusted display as a best effort.
+Rooted or privileged builds may honour it; stock phones drop the flag.)
 
 **Enhanced — Shizuku trusted display.** When you install Shizuku and grant
 Pony, a tiny service runs as the shell user and creates a **trusted**
@@ -26,25 +29,30 @@ virtual display — the same kind `scrcpy` uses, and the only kind the window
 manager will populate with arbitrary apps. While it is up, Pony also flips
 the "force resizable activities" developer setting so portrait‑locked apps
 still open there, and restores it afterward. This is the mode that makes the
-hidden screen broadly useful.
+hidden screen broadly useful. The shell can create a trusted display on
+Android 16, Android 14 and older, and custom ROMs that grant the shell the
+display permissions. If it can't on your phone, Pony doesn't launch other apps
+on the shell display and falls back exactly as in the default mode.
 
 ## Matrix by category
 
 | App category | Default (app‑owned) | With Shizuku (trusted) |
 | --- | --- | --- |
-| Settings, Calculator, Clock, Files, system utilities | Usually works | Works |
-| Google apps (Maps, Gmail, Photos, YouTube, Calendar) | Often bounces to main | Works |
-| Social & chat (WhatsApp, Messenger, Slack, X, Instagram) | Often bounces to main | Works |
-| Shopping & food (Amazon, Target, DoorDash, Uber Eats, Instacart) | Often bounces to main | Works |
-| Rides & travel (Uber, Lyft, Airbnb, United, HotelTonight) | Often bounces to main | Works, but map/GPS views may look empty off‑screen |
-| Media you own a session in (Spotify, Podcasts) | Sometimes works | Works |
-| DRM video (Netflix, Disney+, Prime Video) | Refuses / black frame | Opens, but protected frames stay black on a virtual display |
-| Banking, wallets, authenticators, anything `FLAG_SECURE` | Refuses | Usually refuses; the app itself blocks secondary displays |
+| Settings, Calculator, Clock, Files, system utilities | Bounces to main | Works |
+| Google apps (Maps, Gmail, Photos, YouTube, Calendar) | Bounces to main | Works |
+| Social & chat (WhatsApp, Messenger, Slack, X, Instagram) | Bounces to main | Works |
+| Shopping & food (Amazon, Target, DoorDash, Uber Eats, Instacart) | Bounces to main | Works |
+| Rides & travel (Uber, Lyft, Airbnb, United, HotelTonight) | Bounces to main | Works, but map/GPS views may look empty off‑screen |
+| Media you own a session in (Spotify, Podcasts) | Bounces to main | Works |
+| DRM video (Netflix, Disney+, Prime Video) | Bounces to main | Opens, but protected frames stay black on a virtual display |
+| Banking, wallets, authenticators, anything `FLAG_SECURE` | Bounces to main | Usually refuses; the app itself blocks secondary displays |
 | Camera, phone dialer, always‑on‑top overlays | Stays on main by design | Stays on main by design |
 
-"Usually works" / "often bounces" describe the common case. The real answer
-varies by phone maker, Android version, and app build, which is exactly why
-Pony verifies landing at runtime rather than trusting a list.
+Without Shizuku, only Pony's own screens run on the hidden display; the
+"Bounces to main" column is the platform rule on a stock phone, not a guess.
+The Shizuku column describes the common case. The real answer varies by phone
+maker, Android version, and app build, which is exactly why Pony verifies
+landing at runtime rather than trusting a list.
 
 ## Why an app refuses
 
@@ -60,19 +68,24 @@ Pony verifies landing at runtime rather than trusting a list.
 
 ## When an app can't go off‑screen
 
-Pony asks first (unless you set a standing choice in Settings → main‑screen
-fallback: *ask*, *allow*, or *never*). If you allow it, Pony prefers a
+Pony asks first (unless you set a standing choice in Settings → **Apps that
+can't work out of sight**: *Ask me each time*, *Use a pop‑up window*, or
+*Never use my screen*). If you allow it, Pony prefers a
 **freeform pop‑up** on phones that support one (Samsung pop‑up view or the
 platform freeform feature) before taking over the full main screen, and it
-tells you which happened. Choosing *never* means a refusing app is reported
+tells you which happened. Choosing *Never use my screen* means a refusing app is reported
 as blocked instead of ever touching your screen.
 
 ## Getting the widest coverage
 
-1. Install **Shizuku** and start it (wireless debugging, or `adb`, or root).
-2. In Pony → Settings, turn on the enhanced hidden display and tap **Grant**.
-3. Keep **main‑screen fallback** on *ask* so a refusing app (e.g. your bank)
-   never lands on your screen without you.
+1. In Pony → Settings, under **Run apps out of sight (Shizuku)**, tap
+   **Set up Shizuku**. Pony walks you through installing Shizuku, pairing it
+   with Wireless debugging, and tapping **Start** (adb or root also work).
+2. Tap **Allow** when Shizuku asks whether Pony may use it, and keep
+   **Use Shizuku** on. Shizuku stops after each reboot; open it and tap
+   **Start** again.
+3. Keep **Apps that can't work out of sight** on *Ask me each time* so a
+   refusing app (e.g. your bank) never lands on your screen without you.
 
 Even with Shizuku, `FLAG_SECURE` apps are expected to refuse — that is the
 app protecting itself, not a Pony bug.
