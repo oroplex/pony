@@ -248,6 +248,12 @@ object SafetyPolicy {
         if (money) {
             return Verdict.Confirm(where("Do this in", target) ?: "Continue in a payment app?", "payment_app")
         }
+        // Risky labels prompt on every acting verb, including press / IME keys.
+        val matched = matchRules(listOf(target.haystack(), key).filterNotNull().joinToString(" "))
+        if (matched != null) {
+            if (matched.reason == "send" && isOwnApp(target.packageName)) return Verdict.Allow
+            return confirmRule(matched, target)
+        }
         if (normalized in submitKeys) {
             if (isOwnApp(target.packageName)) return Verdict.Allow
             if (isMessagingApp(target.packageName) || matchRules(target.haystack())?.reason == "send") {

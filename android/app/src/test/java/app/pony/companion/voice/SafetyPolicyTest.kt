@@ -134,6 +134,15 @@ class SafetyPolicyTest {
     }
 
     @Test
+    fun pressOnARiskyLabelAsksJustLikeTap() {
+        val delete = TapTarget("Delete")
+        assertEquals("delete", (SafetyPolicy.forPress("enter", delete) as Verdict.Confirm).reason)
+        assertEquals("Delete this?", (SafetyPolicy.forPress("delete", delete) as Verdict.Confirm).prompt)
+        assertEquals("Send this?", (SafetyPolicy.forPress("send", TapTarget("Send")) as Verdict.Confirm).prompt)
+        assertEquals(Verdict.Allow, SafetyPolicy.forPress("enter", TapTarget("Display")))
+    }
+
+    @Test
     fun unlabeledSendIconAndLocaleWordsAsk() {
         val icon = SafetyPolicy.forTap(
             TapTarget("", packageName = "com.whatsapp", appLabel = "WhatsApp", viewId = "com.whatsapp:id/send", className = "android.widget.ImageButton"),
