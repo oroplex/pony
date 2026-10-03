@@ -27,7 +27,11 @@ class AgentLoop(
     private val memory: String = "",
     private val cap: Int = MAX_STEPS,
     private val retries: Int = MODEL_RETRIES,
+    private val rateLimitRetries: Int = RATE_LIMIT_RETRIES,
     private val sleep: (Long) -> Unit = { Thread.sleep(it) },
+    private val now: () -> Long = { System.currentTimeMillis() },
+    private val random: () -> Double = { Math.random() },
+    private val onStatus: (String) -> Unit = {},
 ) {
     private var lastTree: String? = null
 
@@ -96,22 +100,40 @@ class AgentLoop(
     }
 
     /**
-     * Calls the model, retrying a timeout or a dropped connection a few times
-     * with a growing backoff before it gives up. A Stop lands during the wait,
-     * and a non-retryable error (a rejected key, a refused request) fails right
-     * away with its own message. Retries don't spend task steps, so the 30-step
-     * cap still bounds the real work on the phone.
+     * Calls the model, retrying a timeout, a dropped connection, or a
+     * per-minute rate limit before it gives up. A Stop lands during the wait,
+     * and a hard error (rejected key, daily/billing quota) fails right away.
+     * Retries don't spend task steps, so the 30-step cap still bounds the
+     * real work on the phone.
      */
     private fun completeWithRetry(history: List<LoopMessage>): Attempt {
         var attempt = 0
+        var rateAttempts = 0
+        var rateWaited = 0L
         while (true) {
             if (stopped()) return Attempt.Stopped
             try {
                 return Attempt.Ok(model.complete(history))
             } catch (err: Exception) {
-                if (attempt >= retries || !BrainError.retryable(err)) return Attempt.Failed(BrainError.message(err))
-                attempt++
-                if (!waitBackoff(attempt)) return Attempt.Stopped
+                val classified = BrainError.classify(err, now())
+                when (classified.kind) {
+                    BrainError.Kind.RATE_LIMIT -> {
+                        if (rateAttempts >= rateLimitRetries) return Attempt.Failed(BrainError.message(err))
+                        val remaining = BrainError.RATE_LIMIT_MAX_WAIT_MS - rateWaited
+                        if (remaining <= 0L) return Attempt.Failed(BrainError.message(err))
+                        rateAttempts++
+                        val delay = BrainError.waitMs(classified, rateAttempts, remaining, random)
+                        if (delay <= 0L) return Attempt.Failed(BrainError.message(err))
+                        if (!waitRateLimit(delay)) return Attempt.Stopped
+                        rateWaited += delay
+                    }
+                    BrainError.Kind.TIMEOUT, BrainError.Kind.NETWORK -> {
+                        if (attempt >= retries) return Attempt.Failed(BrainError.message(err))
+                        attempt++
+                        if (!waitBackoff(attempt)) return Attempt.Stopped
+                    }
+                    else -> return Attempt.Failed(BrainError.message(err))
+                }
             }
         }
     }
@@ -121,6 +143,24 @@ class AgentLoop(
         var left = BrainError.backoffMs(attempt)
         while (left > 0) {
             if (stopped()) return false
+            val slice = minOf(BACKOFF_SLICE_MS, left)
+            sleep(slice)
+            left -= slice
+        }
+        return !stopped()
+    }
+
+    /** Waits out a rate limit, showing remaining time, and stays Stop-aware. */
+    private fun waitRateLimit(delayMs: Long): Boolean {
+        var left = delayMs
+        var lastShown = -1L
+        while (left > 0) {
+            if (stopped()) return false
+            val secs = if (left >= 1_000L) (left + 999) / 1_000 else 0L
+            if (secs != lastShown) {
+                lastShown = secs
+                onStatus(BrainError.statusLine(left))
+            }
             val slice = minOf(BACKOFF_SLICE_MS, left)
             sleep(slice)
             left -= slice
@@ -143,6 +183,9 @@ class AgentLoop(
 
         /** How many times a model timeout or network blip is retried before giving up. */
         const val MODEL_RETRIES = 3
+
+        /** How many times a per-minute rate limit is retried before giving up. */
+        const val RATE_LIMIT_RETRIES = BrainError.RATE_LIMIT_RETRIES
 
         /** Backoff is waited in slices this long, so a Stop doesn't sit through the whole wait. */
         const val BACKOFF_SLICE_MS = 200L

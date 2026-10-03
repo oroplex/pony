@@ -85,7 +85,7 @@ export class MockPhone {
           ok: true,
           result: {
             app: "Pony Companion (mock)",
-            version: "0.6.3",
+            version: "0.6.4",
             features: ["resume", "tasks", "done", "deferral", "cover_check", "listen", "action_ttl"],
             sessionEndsAt: this.sessionEndsAt,
             now: Date.now(),

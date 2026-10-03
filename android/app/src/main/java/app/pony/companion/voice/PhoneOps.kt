@@ -51,10 +51,11 @@ object PhoneOps {
             "tap" -> {
                 val x = call.args["x"]?.toDoubleOrNull() ?: return "missing x"
                 val y = call.args["y"]?.toDoubleOrNull() ?: return "missing y"
-                val label = ScreenRouter.labelAt(context, x, y, null)
+                val target = ScreenRouter.tapTarget(context, x, y, null)
+                val label = target.label
                 val acted = ScreenRouter.tapReliably(context, x, y, label, null, watch)
                 record(context, "tap", StepKind.Tap, if (label.isNotBlank()) "Tapped “${label.take(60)}”" else "Tapped the screen", acted)
-                if (acted.ok) noteCommitIfSending(label)
+                if (acted.ok) noteCommitIfSending(target)
                 narrate(acted.ok, "tapped ${acted.fields["x"]},${acted.fields["y"]}", acted.error ?: "tap_failed", acted)
             }
             "swipe" -> {
@@ -235,11 +236,11 @@ object PhoneOps {
     /**
      * Once Pony taps a control that sends, pays, posts, or deletes, the task is
      * committed and no undo is offered for it — the owner's rule is to never undo
-     * anything already sent or paid. Matching is on the tapped control's own label.
+     * anything already sent or paid. Matching uses the same tap target as the
+     * confirm gate, so a bare icon on a money screen still commits.
      */
-    private fun noteCommitIfSending(label: String) {
-        if (label.isBlank()) return
-        val verdict = SafetyPolicy.forTap(TapTarget(label))
+    private fun noteCommitIfSending(target: TapTarget) {
+        val verdict = SafetyPolicy.forTap(target)
         if (verdict is Verdict.Confirm && UndoPlanner.committedBy(verdict.reason)) {
             UndoLog.commit(TaskRuntime.current()?.id)
         }

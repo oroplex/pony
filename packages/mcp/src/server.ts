@@ -9,7 +9,7 @@ import type { CommandResult, ProgressEvent, RequestOptions } from "@pony/client"
 
 import { PhoneController, endedMessage, type ControllerOptions, type DisplayOpts } from "./controller.ts";
 
-export const PONY_MCP_VERSION = "0.6.3";
+export const PONY_MCP_VERSION = "0.6.4";
 
 const displayArgs = {
   background: z

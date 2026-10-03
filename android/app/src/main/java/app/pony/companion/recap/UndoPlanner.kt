@@ -38,7 +38,7 @@ object UndoPlanner {
      * the world. Settings and security changes are deliberately not here: those
      * are exactly what "turn a setting back" undoes.
      */
-    val COMMITTING = setOf("send", "payment", "payment_app", "purchase", "transfer", "post", "delete", "call")
+    val COMMITTING = setOf("send", "payment", "payment_app", "money_screen", "purchase", "transfer", "post", "delete", "call")
 
     /** True when a confirmed action with this safety reason commits the task. */
     fun committedBy(reason: String?): Boolean = reason != null && reason in COMMITTING

@@ -360,5 +360,141 @@ class AgentLoopTest {
         // First call throws, the backoff flips Stop, so there's no second model call.
         assertEquals(1, calls)
     }
+
+    @Test
+    fun aRateLimitHonorsRetryAfterAndKeepsTheTaskAlive() {
+        var calls = 0
+        val waits = mutableListOf<Long>()
+        val statuses = mutableListOf<String>()
+        val loop = AgentLoop(
+            model = StepModel {
+                calls++
+                if (calls == 1) {
+                    throw ProviderHttpException(429, """{"error":{"code":"rate_limit_exceeded"}}""", retryAfter = "12")
+                }
+                ModelTurn(calls = listOf(ToolCall("d", "done", mapOf("text" to "Opened Venmo."))))
+            },
+            execute = { error("should not run") },
+            guard = { Guard.Allow },
+            confirm = { true },
+            sleep = { waits += it },
+            random = { 0.5 },
+            onStatus = { statuses += it },
+        )
+        val result = loop.run("open venmo")
+        assertEquals("done", result.status)
+        assertEquals("Opened Venmo.", result.message)
+        assertEquals(2, calls)
+        assertEquals(12_000L, waits.sum())
+        assertTrue(waits.all { it <= AgentLoop.BACKOFF_SLICE_MS })
+        assertTrue(statuses.any { it.startsWith("Waiting for rate limit") })
+        assertTrue(statuses.any { it.contains("12s") })
+    }
+
+    @Test
+    fun rateLimitBackoffGrowsWhenThereIsNoRetryAfter() {
+        var calls = 0
+        val waits = mutableListOf<Long>()
+        val loop = AgentLoop(
+            model = StepModel {
+                calls++
+                if (calls <= 2) throw ProviderHttpException(429, "rate_limit_error")
+                ModelTurn(calls = listOf(ToolCall("d", "done", mapOf("text" to "Done."))))
+            },
+            execute = { error("should not run") },
+            guard = { Guard.Allow },
+            confirm = { true },
+            sleep = { waits += it },
+            random = { 0.5 },
+        )
+        val result = loop.run("do a thing")
+        assertEquals("done", result.status)
+        assertEquals(BrainError.rateLimitBackoffMs(1) { 0.5 } + BrainError.rateLimitBackoffMs(2) { 0.5 }, waits.sum())
+    }
+
+    @Test
+    fun rateLimitGivesUpAfterTheMaxRetries() {
+        var calls = 0
+        val loop = AgentLoop(
+            model = StepModel {
+                calls++
+                throw ProviderHttpException(429, "rate_limit_exceeded", retryAfter = "1")
+            },
+            execute = { error("should not run") },
+            guard = { Guard.Allow },
+            confirm = { true },
+            sleep = {},
+        )
+        val result = loop.run("do a thing")
+        assertEquals("error", result.status)
+        assertEquals("The brain is rate-limited right now — try again in a moment.", result.message)
+        assertEquals(AgentLoop.RATE_LIMIT_RETRIES + 1, calls)
+    }
+
+    @Test
+    fun rateLimitStopsWhenTheTotalWaitCapIsSpent() {
+        var calls = 0
+        val waits = mutableListOf<Long>()
+        val loop = AgentLoop(
+            model = StepModel {
+                calls++
+                throw ProviderHttpException(429, "too many requests", retryAfter = "50")
+            },
+            execute = { error("should not run") },
+            guard = { Guard.Allow },
+            confirm = { true },
+            sleep = { waits += it },
+        )
+        val result = loop.run("do a thing")
+        assertEquals("error", result.status)
+        assertEquals(BrainError.RATE_LIMIT_MAX_WAIT_MS, waits.sum())
+        // First wait 50s, second wait the remaining 10s, then the cap is spent.
+        assertEquals(3, calls)
+    }
+
+    @Test
+    fun hardQuotaAndAuthFailImmediatelyWithoutWaiting() {
+        for (err in listOf(
+            ProviderHttpException(429, """{"error":{"code":"insufficient_quota","message":"You exceeded your current quota, please check your plan and billing details."}}"""),
+            ProviderHttpException(401, "the key was rejected"),
+            ProviderHttpException(403, "Forbidden"),
+            IllegalStateException("invalid_api_key"),
+        )) {
+            var calls = 0
+            val loop = AgentLoop(
+                model = StepModel {
+                    calls++
+                    throw err
+                },
+                execute = { error("should not run") },
+                guard = { Guard.Allow },
+                confirm = { true },
+                sleep = { error("a hard error must not wait") },
+            )
+            val result = loop.run("do a thing")
+            assertEquals(err.message, "error", result.status)
+            assertEquals(err.message, 1, calls)
+            assertFalse(err.message, result.message.contains("rate-limited"))
+        }
+    }
+
+    @Test
+    fun rateLimitStatusCallbackIsEmittedWhileWaiting() {
+        val statuses = mutableListOf<String>()
+        val loop = AgentLoop(
+            model = StepModel {
+                throw ProviderHttpException(429, "RESOURCE_EXHAUSTED per-minute quota", retryAfter = "2")
+            },
+            execute = { error("should not run") },
+            guard = { Guard.Allow },
+            confirm = { true },
+            sleep = {},
+            onStatus = { statuses += it },
+        )
+        loop.run("do a thing")
+        assertTrue(statuses.isNotEmpty())
+        assertTrue(statuses.all { it.startsWith("Waiting for rate limit") })
+        assertTrue(statuses.first().contains("2s"))
+    }
 }
 

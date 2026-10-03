@@ -2,6 +2,30 @@
 
 The first list under each version is what the phone shows in **Check for updates**. Keep those lines short and in plain English.
 
+## 0.6.4
+
+- On payment and checkout screens — Venmo, PayPal, Cash App, Zelle, Google Pay, and major bank apps — Pony now asks before every tap, even a bare icon or a tap by coordinates.
+- Checkout pages in other apps are caught the same way when the screen says Pay, Transfer, Send, Checkout, or Place order.
+- If a brain hits a per-minute rate limit, Pony waits and retries instead of stopping the task, and shows **Waiting for rate limit…** with the time left.
+- A used-up daily or billing quota, or a rejected key, still fails right away.
+
+### Details
+
+**Money-screen confirmation**
+- `MoneyScreens` is a single documented list of apps that move money. Add a `KnownApp` row to cover another payment or bank app. A row with no `activities` treats the whole package as a money screen; named activities or window titles limit the match to checkout / pay screens (Amazon is the example).
+- Known packages include Venmo, PayPal, Cash App, Zelle, Google Pay / Wallet, Samsung Pay, Revolut, Wise, Coinbase, and major US / UK / AU bank apps. Matching is on the package name, plus activity or window title when the row lists them.
+- Generic heuristics cover apps that are not listed: activity or window names tokenized from camel case so `CheckoutActivity` and `SendMoney` match, while `DisplayActivity` does not; and on-screen text such as Pay, Transfer, Confirm payment, Send, Checkout, and Place order.
+- On a detected money screen every tap asks first, including an unlabeled icon and a tap by coordinates. Existing label and accessibility-text matching is unchanged — **Pay $24.99** still asks "Pay $24.99?", Pony's own Ask **Send** is still exempt, and a Settings **Continue** still is not gated.
+- The accessibility tap target now carries the foreground activity, window title, and visible screen text so the remote session path and the on-phone brain share the same gate.
+
+**Rate-limit handling**
+- Provider HTTP failures keep their status, sanitized body, and `Retry-After` header (`ProviderHttpException`). `BrainError` classifies HTTP 429, Gemini `RESOURCE_EXHAUSTED` with a per-minute quota, OpenAI `rate_limit_exceeded`, and Anthropic `rate_limit_error` as retryable rate limits.
+- `Retry-After` is honored in seconds or HTTP-date form. Provider hints (`retryDelay`, `retry_after_ms`, `retry_after`) are used when the header is missing. Otherwise the wait is exponential backoff with ±20% jitter, about five retries, and a 60 s total wait cap per model step. Sleep, the clock, and the jitter source are injectable.
+- While waiting, the task headline is **Waiting for rate limit…** with the remaining seconds. Daily / billing quota, `insufficient_quota`, 401/403, and an invalid key still fail on the first try.
+
+**Release**
+- App and MCP are 0.6.4 (versionCode 11). CI builds an **unsigned** release APK (`:app:assembleRelease` → `app/build/outputs/apk/release/app-release-unsigned.apk`). Sign it with the existing private key outside this repo. No keystore is created or committed.
+
 ## 0.6.3
 
 - Hidden-screen launches work again on Android 17 / One UI 9: Pony's trusted virtual display is created in its own display group so Settings, Keep, Chrome, and Calculator stay off your screen, in a full-size window.

@@ -12,7 +12,7 @@ class UndoPlannerTest {
 
     @Test
     fun treatsSentAndPaidActionsAsCommitting() {
-        for (reason in listOf("send", "payment", "payment_app", "purchase", "transfer", "post", "delete", "call")) {
+        for (reason in listOf("send", "payment", "payment_app", "money_screen", "purchase", "transfer", "post", "delete", "call")) {
             assertTrue(reason, UndoPlanner.committedBy(reason))
         }
     }
