@@ -7,7 +7,7 @@ Pony is a harness for your Android phone. Claude, Grok, Gemini, OpenAI, or any M
 The agent never needs a vendor SDK. Pony shares the screen, reads the UI tree, and performs the gestures. You choose which model — or which MCP host — is in charge.
 
 - **Site:** [pony.karlmagendavid.com](https://pony.karlmagendavid.com)
-- **APK:** [pony-latest.apk](https://github.com/oroplex/pony/releases/latest/download/pony-latest.apk) (0.6.4 unsigned build from this tree; the owner signs with the release key). [latest.json](https://download.pony.karlmagendavid.com/latest.json) lists the current signed version and its SHA-256.
+- **APK:** [pony-latest.apk](https://github.com/oroplex/pony/releases/latest/download/pony-latest.apk), the signed APK for the current release. Signed APKs are published on [GitHub Releases](https://github.com/oroplex/pony/releases/latest). [latest.json](https://download.pony.karlmagendavid.com/latest.json) lists the current signed version and its SHA-256.
 - **Code:** [github.com/oroplex/pony](https://github.com/oroplex/pony)
 - **This tree:** 0.6.4 (versionCode 11), MIT licensed
 
@@ -150,7 +150,7 @@ The unsigned artifact is `android/app/build/outputs/apk/release/app-release-unsi
 
 ```bash
 $ANDROID_HOME/build-tools/36.0.0/apksigner sign --ks /path/to/your-release.jks \
-  --out pony-0.6.4.apk app/build/outputs/apk/release/app-release-unsigned.apk
+  --out pony-signed.apk app/build/outputs/apk/release/app-release-unsigned.apk
 ```
 
 Settings → Check for updates reads `https://download.pony.karlmagendavid.com/latest.json` and only installs an APK signed with the same certificate as the app already on the phone. A self-built install will not accept the official update stream.
