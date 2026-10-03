@@ -7,7 +7,7 @@ Pony is a harness for your Android phone. Claude, Grok, Gemini, OpenAI, or any M
 The agent never needs a vendor SDK. Pony shares the screen, reads the UI tree, and performs the gestures. You choose which model — or which MCP host — is in charge.
 
 - **Site:** [pony.karlmagendavid.com](https://pony.karlmagendavid.com)
-- **APK:** [pony-latest.apk](https://download.pony.karlmagendavid.com/pony-latest.apk) (0.6.2, SHA-256 `c64f123b24b8969474ebc117664dbbc4b0420eaa139030fd7b468c5660b697a6`). [latest.json](https://download.pony.karlmagendavid.com/latest.json) always lists the current version and its SHA-256.
+- **APK:** [pony-latest.apk](https://github.com/oroplex/pony/releases/latest/download/pony-latest.apk) (0.6.2, SHA-256 `c64f123b24b8969474ebc117664dbbc4b0420eaa139030fd7b468c5660b697a6`). [latest.json](https://download.pony.karlmagendavid.com/latest.json) always lists the current version and its SHA-256.
 - **Code:** [github.com/oroplex/pony](https://github.com/oroplex/pony)
 - **This tree:** 0.6.2 (versionCode 9), MIT licensed
 
@@ -47,7 +47,7 @@ Distribution is a sideloaded APK, not Google Play. See [PLAY_POLICY.md](PLAY_POL
 
 ## Install
 
-1. On the phone, download [pony-latest.apk](https://download.pony.karlmagendavid.com/pony-latest.apk) and open it. If Android asks, allow your browser to install unknown apps. (Optional: check the file against the SHA-256 above.)
+1. On the phone, download [pony-latest.apk](https://github.com/oroplex/pony/releases/latest/download/pony-latest.apk) and open it. If Android asks, allow your browser to install unknown apps. (Optional: check the file against the SHA-256 above.)
 2. Open Pony, read what it does, and agree to the privacy promise.
 3. Turn on **Pony control** in **Settings › Accessibility**. On Android 13 and newer the switch may be greyed out: first open Pony's **App info**, tap the **⋮** menu, and choose **Allow restricted settings**.
 4. Run the first task if you like (Pony opens Calculator and adds 2 + 2).
