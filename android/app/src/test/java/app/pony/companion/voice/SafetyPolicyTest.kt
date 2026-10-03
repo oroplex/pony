@@ -57,4 +57,71 @@ class SafetyPolicyTest {
             assertEquals(label, Verdict.Allow, SafetyPolicy.forTap(TapTarget(label)))
         }
     }
+
+    @Test
+    fun knownMoneyAppsAskBeforeEveryTap() {
+        val venmo = SafetyPolicy.forTap(TapTarget("Friends", packageName = "com.venmo", appLabel = "Venmo"))
+        assertTrue(venmo is Verdict.Confirm)
+        assertEquals("Tap this in Venmo?", (venmo as Verdict.Confirm).prompt)
+        assertEquals("payment_app", venmo.reason)
+
+        val chase = SafetyPolicy.forTap(TapTarget("Accounts", packageName = "com.chase.sig.android", appLabel = "Chase"))
+        assertTrue(chase is Verdict.Confirm)
+        assertEquals("payment_app", (chase as Verdict.Confirm).reason)
+    }
+
+    @Test
+    fun heuristicCheckoutScreensAskBeforeEveryTap() {
+        val chrome = SafetyPolicy.forTap(
+            TapTarget(
+                "Home",
+                packageName = "com.android.chrome",
+                appLabel = "Chrome",
+                activity = "CheckoutActivity",
+                screenText = "Checkout\nPlace order\n$24.00",
+            ),
+        )
+        assertTrue(chrome is Verdict.Confirm)
+        assertEquals("money_screen", (chrome as Verdict.Confirm).reason)
+
+        val byText = SafetyPolicy.forTap(
+            TapTarget("Continue shopping", packageName = "com.example.shop", screenText = "Confirm payment"),
+        )
+        assertTrue(byText is Verdict.Confirm)
+    }
+
+    @Test
+    fun unlabeledCoordinateTapOnAMoneyScreenStillNeedsConfirmation() {
+        val icon = SafetyPolicy.forTap(TapTarget("", packageName = "com.venmo", appLabel = "Venmo"))
+        assertTrue(icon is Verdict.Confirm)
+        assertEquals("Tap this in Venmo?", (icon as Verdict.Confirm).prompt)
+
+        val coords = SafetyPolicy.forTap(
+            TapTarget("", packageName = "com.android.chrome", activity = "PaymentActivity"),
+        )
+        assertTrue(coords is Verdict.Confirm)
+        assertEquals("money_screen", (coords as Verdict.Confirm).reason)
+    }
+
+    @Test
+    fun aNonMoneyScreenAddsNoExtraConfirmation() {
+        assertEquals(Verdict.Allow, SafetyPolicy.forTap(TapTarget("Search", packageName = "com.android.settings")))
+        assertEquals(Verdict.Allow, SafetyPolicy.forTap(TapTarget("", packageName = "com.android.calculator2")))
+        assertEquals(Verdict.Allow, SafetyPolicy.forTap(TapTarget("2", packageName = "com.android.calculator2")))
+        assertEquals(Verdict.Allow, SafetyPolicy.forTap(TapTarget("Continue", packageName = "com.android.settings")))
+    }
+
+    @Test
+    fun existingLabelMatchingStillWorksOnAndOffMoneyScreens() {
+        assertEquals("Pay $24.99?", prompt(TapTarget("Pay $24.99")))
+        assertEquals("Send this?", prompt(TapTarget("Send")))
+        assertEquals("Buy this?", prompt(TapTarget("Place order")))
+        assertEquals("Transfer this?", prompt(TapTarget("Transfer")))
+        assertEquals(
+            "Send this in WhatsApp?",
+            prompt(TapTarget("Send", packageName = "com.whatsapp", appLabel = "WhatsApp")),
+        )
+        // Label rules still win on a known money app, so Pay keeps its amount prompt.
+        assertEquals("Pay $8.00?", prompt(TapTarget("Pay $8.00", packageName = "com.squareup.cash", appLabel = "Cash App")))
+    }
 }

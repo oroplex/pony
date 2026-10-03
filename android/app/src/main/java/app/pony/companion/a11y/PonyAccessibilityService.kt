@@ -616,7 +616,11 @@ class PonyAccessibilityService : AccessibilityService() {
     /** What a tap at (x, y) would press: its label, whether it's a password field, and whose app it is. */
     fun tapTarget(x: Float, y: Float, displayId: Int = Display.DEFAULT_DISPLAY): TapTarget {
         val nodes = roots(displayId)
-        if (nodes.isEmpty()) return TapTarget("")
+        val activity = CallGuard.foregroundClass
+        val title = focusedWindowTitle(displayId)
+        if (nodes.isEmpty()) {
+            return TapTarget("", packageName = CallGuard.foregroundPackage, activity = activity, windowTitle = title)
+        }
         return try {
             var best: TapTarget? = null
             var bestArea = Int.MAX_VALUE
@@ -648,11 +652,47 @@ class PonyAccessibilityService : AccessibilityService() {
                 }
             }
             nodes.forEach { walk(it) }
+            val screen = visibleScreenText(nodes)
             val found = best ?: TapTarget("", packageName = nodes.firstOrNull()?.packageName?.toString())
-            if (password && !found.isPassword) found.copy(isPassword = true) else found
+            val withPassword = if (password && !found.isPassword) found.copy(isPassword = true) else found
+            withPassword.copy(
+                activity = activity,
+                windowTitle = title,
+                screenText = screen,
+                packageName = withPassword.packageName ?: CallGuard.foregroundPackage,
+            )
         } finally {
             nodes.forEach { runCatching { it.recycle() } }
         }
+    }
+
+    private fun focusedWindowTitle(displayId: Int): String? {
+        val windows = orderedWindows(displayId)
+        val focused = windows.firstOrNull { it.isFocused } ?: windows.firstOrNull()
+        return focused?.title?.toString()?.trim()?.takeIf { it.isNotBlank() }
+    }
+
+    private fun visibleScreenText(nodes: List<AccessibilityNodeInfo>, limit: Int = 2_000): String {
+        val out = StringBuilder()
+        fun walk(node: AccessibilityNodeInfo) {
+            if (out.length >= limit) return
+            if (!TextEntry.isPasswordField(node.isPassword, node.inputType)) {
+                val raw = sequenceOf(node.text, node.contentDescription)
+                    .mapNotNull { it?.toString()?.trim() }
+                    .firstOrNull { it.isNotEmpty() }
+                if (raw != null) {
+                    if (out.isNotEmpty()) out.append('\n')
+                    out.append(raw.take(80))
+                }
+            }
+            for (i in 0 until node.childCount) {
+                val child = node.getChild(i) ?: continue
+                walk(child)
+                child.recycle()
+            }
+        }
+        nodes.forEach { walk(it) }
+        return out.toString().take(limit)
     }
 
     fun focusedIsPassword(displayId: Int = Display.DEFAULT_DISPLAY): Boolean {

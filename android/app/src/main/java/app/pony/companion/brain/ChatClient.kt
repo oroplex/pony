@@ -49,7 +49,11 @@ object ChatClient {
             val text = response.body?.string().orEmpty()
             if (!response.isSuccessful) {
                 val safe = AdapterRequests.sanitize(text.ifBlank { "HTTP ${response.code}" }, apiKey)
-                throw IllegalStateException(safe.take(300))
+                throw ProviderHttpException(
+                    status = response.code,
+                    body = safe.take(300),
+                    retryAfter = response.header("Retry-After"),
+                )
             }
             return text
         }

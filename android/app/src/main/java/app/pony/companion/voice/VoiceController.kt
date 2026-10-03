@@ -717,6 +717,7 @@ object VoiceController {
                     LockState.awaitUnlock(app) { !isCurrent(gen, taskId) }
                 },
                 memory = Memory.summary(app),
+                onStatus = { line -> TaskRuntime.tracker.headline(line) },
             )
             UndoLog.start(taskId)
             RecapShots.start(taskId)

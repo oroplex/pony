@@ -16,8 +16,8 @@ android {
         applicationId = "app.pony.companion"
         minSdk = 29
         targetSdk = 36
-        versionCode = 10
-        versionName = "0.6.3"
+        versionCode = 11
+        versionName = "0.6.4"
         ndk {
             abiFilters += listOf("arm64-v8a")
         }

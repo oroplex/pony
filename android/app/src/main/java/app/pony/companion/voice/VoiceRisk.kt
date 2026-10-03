@@ -7,6 +7,12 @@ data class TapTarget(
     val packageName: String? = null,
     val appLabel: String? = null,
     val viewId: String? = null,
+    /** Foreground activity or window class, when accessibility knows it. */
+    val activity: String? = null,
+    /** Focused window title, when the system exposes one. */
+    val windowTitle: String? = null,
+    /** Visible labels on the current screen, used to spot checkout / pay UI. */
+    val screenText: String? = null,
 )
 
 sealed class Verdict {
@@ -21,7 +27,9 @@ sealed class Verdict {
 /**
  * Taps that must be spoken back and accepted with an explicit yes: password
  * fields, payments, sending, buying, deleting, calling, posting, and security
- * changes. Matching is on the control's own label, not the whole screen.
+ * changes. Label matching still uses the control's own label or accessibility
+ * text. On a [MoneyScreens] hit — a known payment app or a checkout heuristic
+ * — every tap asks first, including a bare icon or a tap by coordinates.
  */
 object SafetyPolicy {
     private data class Rule(val pattern: Regex, val prompt: String, val reason: String)
@@ -47,20 +55,6 @@ object SafetyPolicy {
         ),
     )
 
-    private val paymentApps = setOf(
-        "com.google.android.apps.walletnfcrel",
-        "com.google.android.apps.nbu.paisa.user",
-        "com.samsung.android.spay",
-        "com.samsung.android.samsungpay.gear",
-        "com.paypal.android.p2pmobile",
-        "com.venmo",
-        "com.squareup.cash",
-        "com.zellepay.zelle",
-        "com.revolut.revolut",
-        "com.transferwise.android",
-        "com.coinbase.android",
-    )
-
     private val confirmWords = words("confirm", "continue", "next", "submit", "approve", "authori[sz]e", "ok", "done", "agree", "accept")
 
     private val amount = Regex("([$€£¥₹]\\s?\\d)|(\\d[\\d,.]*\\s?(usd|eur|gbp|dollars?|euros?))", RegexOption.IGNORE_CASE)
@@ -78,9 +72,9 @@ object SafetyPolicy {
             return Verdict.Confirm("Tap the password field? Pony still won't read or type into it.", "password_field")
         }
         val label = target.label.trim()
-        val inPaymentApp = target.packageName != null && target.packageName in paymentApps
+        val money = MoneyScreens.matches(target)
         if (label.isEmpty()) {
-            return if (inPaymentApp) Verdict.Confirm(where("Tap this in", target) ?: "Tap this in a payment app?", "payment_app") else Verdict.Allow
+            return if (money) moneyTap(target) else Verdict.Allow
         }
         val rule = rules.firstOrNull { it.pattern.containsMatchIn(label) }
         if (rule != null) {
@@ -94,13 +88,22 @@ object SafetyPolicy {
             }
             return Verdict.Confirm(prompt, rule.reason)
         }
-        if (inPaymentApp && (confirmWords.containsMatchIn(label) || amount.containsMatchIn(label))) {
+        if (money && (confirmWords.containsMatchIn(label) || amount.containsMatchIn(label))) {
             return Verdict.Confirm(where("Confirm this in", target) ?: "Confirm this payment?", "payment_app")
         }
         if (amount.containsMatchIn(label) && confirmWords.containsMatchIn(label)) {
             return Verdict.Confirm("Confirm ${amountIn(label) ?: "this amount"}?", "payment")
         }
+        if (money) return moneyTap(target)
         return Verdict.Allow
+    }
+
+    /** Every control on a money screen, including an unlabeled icon or a coordinate tap. */
+    private fun moneyTap(target: TapTarget): Verdict {
+        val known = MoneyScreens.isKnownPackage(target.packageName)
+        val prompt = where("Tap this in", target)
+            ?: if (known) "Tap this in a payment app?" else "Tap this on a payment screen?"
+        return Verdict.Confirm(prompt, if (known) "payment_app" else "money_screen")
     }
 
     fun forOpenApp(packageName: String, label: String = packageName): Verdict {

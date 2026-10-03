@@ -1,6 +1,6 @@
 {
   "name": "pony-mcp",
-  "version": "0.6.3",
+  "version": "0.6.4",
   "description": "MCP server that lets an AI assistant see and drive your Android phone through the Pony app",
   "license": "MIT",
   "type": "module",
