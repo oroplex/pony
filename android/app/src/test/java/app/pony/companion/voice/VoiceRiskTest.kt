@@ -23,7 +23,7 @@ class VoiceRiskTest {
         assertNull(VoiceRisk.promptFor("tap", "Recall"))
         assertNull(VoiceRisk.promptFor("tap", "Display"))
         assertNull(VoiceRisk.promptFor("type", "Send"))
-        assertNull(VoiceRisk.promptFor("swipe", "Delete"))
+        assertEquals("Delete this?", VoiceRisk.promptFor("swipe", "Delete"))
     }
 
     @Test
