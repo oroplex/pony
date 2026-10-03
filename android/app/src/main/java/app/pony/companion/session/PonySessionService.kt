@@ -34,6 +34,7 @@ import app.pony.companion.display.DisplayPolicy
 import app.pony.companion.display.ScreenGuard
 import app.pony.companion.display.ScreenRouter
 import app.pony.companion.display.Watch
+import app.pony.companion.input.ImeStatus
 import app.pony.companion.net.CleartextPolicy
 import app.pony.companion.net.RelayClient
 import app.pony.companion.proto.AppMessage
@@ -358,17 +359,46 @@ class PonySessionService : Service(), RelayClient.Listener {
             append("decrypt", e.message ?: "bad frame", false)
             return
         }
+        if (plain.kind == "evt" && plain.op == "cancel") {
+            val ref = plain.result?.optString("ref") ?: plain.params?.optString("ref")
+            if (!ref.isNullOrBlank()) {
+                ActionGate.cancel(ref)
+                VoiceController.cancelPrompt()
+            }
+            return
+        }
         if (plain.kind != "req" || plain.op == null) return
+        val receivedAt = System.currentTimeMillis()
         val lane = if (plain.op == "wait_for_request") waits else commands
         lane.execute {
-            val result = handle(plain)
+            val ticket = ActionGate.ticket(plain.id, plain.op, plain.params, receivedAt)
+            val result = if (ActionGate.abandoned(ticket)) {
+                expiredCmd(ticket)
+            } else {
+                try {
+                    handle(plain, ticket)
+                } finally {
+                    ActionGate.forget(plain.id)
+                }
+            }
             val sent = send(AppMessage(id = plain.id, kind = "res", ok = result.ok, error = result.error, result = result.result))
             val standing = plain.params?.optBoolean("listen", false) == true
             if (!sent && !standing) result.handedOut?.let { VoiceBus.inbox.putBack(it) }
         }
     }
 
-    private fun handle(msg: AppMessage): Cmd {
+    private fun expiredCmd(ticket: ActionTicket): Cmd {
+        append(ticket.op ?: "action", "expired", false)
+        return Cmd(
+            false,
+            ActionExpiry.EXPIRED,
+            JSONObject().put("reason", ActionExpiry.EXPIRED).put("id", ticket.id),
+        )
+    }
+
+    private fun handle(msg: AppMessage): Cmd = handle(msg, ActionGate.ticket(msg.id, msg.op, msg.params))
+
+    private fun handle(msg: AppMessage, ticket: ActionTicket): Cmd {
         val connection = SessionRepository.snapshot().connection
         if (connection != Connection.Connected && connection != Connection.Pairing && connection != Connection.Reconnecting) {
             return Cmd(false, "disconnected")
@@ -382,8 +412,9 @@ class PonySessionService : Service(), RelayClient.Listener {
             return Cmd(false, "locked")
         }
         if (screenOp && op != "screenshot" && PonyAccessibilityService.instance == null) return Cmd(false, "accessibility_off")
+        if (ActionGate.abandoned(ticket)) return expiredCmd(ticket)
         if (op in ACTING_OPS) PonyAccessibilityService.instance?.holdKeyboard()
-        val watch = remoteWatch(msg.id)
+        val watch = remoteWatch(msg.id, ticket)
         return try {
             when (op) {
                 "ping" -> Cmd(true, result = JSONObject().put("pong", true)).also { append("ping", "ok", true) }
@@ -433,10 +464,14 @@ class PonySessionService : Service(), RelayClient.Listener {
                     val target = ScreenRouter.tapTarget(this, x, y, params)
                     val verdict = SafetyPolicy.forTap(target)
                     if (verdict is Verdict.Confirm) watch.deferred(AWAITING_OWNER, 0)
-                    if (verdict is Verdict.Confirm && !VoiceController.confirmBlocking(this, verdict.prompt)) {
-                        append("tap", "not confirmed", false)
-                        VoiceController.onRemoteStep(this, StepKind.Confirm, "You declined: ${verdict.prompt}", false)
-                        return Cmd(false, "not_confirmed", JSONObject().put("reason", verdict.reason))
+                    if (verdict is Verdict.Confirm) {
+                        val answer = VoiceController.confirmOutcome(this, verdict.prompt, cancelled = { watch.cancelled() })
+                        if (answer.expired) return expiredCmd(ticket)
+                        if (!answer.accepted) {
+                            append("tap", "not confirmed", false)
+                            VoiceController.onRemoteStep(this, StepKind.Confirm, "You declined: ${verdict.prompt}", false)
+                            return Cmd(false, "not_confirmed", JSONObject().put("reason", verdict.reason))
+                        }
                     }
                     val acted = ScreenRouter.tap(this, x, y, params, watch)
                     append("tap", "${acted.fields["x"]},${acted.fields["y"]} ${acted.error ?: ""}".trim(), acted.ok)
@@ -520,6 +555,7 @@ class PonySessionService : Service(), RelayClient.Listener {
                 "type" -> {
                     val text = params.optString("text")
                     val append = params.optString("mode").equals("append", ignoreCase = true) || params.optBoolean("append", false)
+                    if (ActionGate.abandoned(ticket)) return expiredCmd(ticket)
                     val acted = ScreenRouter.type(this, text, append, params, watch)
                     if (acted.ok) {
                         append("type", "${acted.fields["length"]} chars via ${acted.fields["method"]}", true)
@@ -543,13 +579,18 @@ class PonySessionService : Service(), RelayClient.Listener {
                     val label = BackgroundHost.appLabel(this, pkg)
                     val verdict = SafetyPolicy.forOpenApp(pkg, label)
                     if (verdict is Verdict.Confirm) watch.deferred(AWAITING_OWNER, 0)
-                    if (verdict is Verdict.Confirm && !VoiceController.confirmBlocking(this, verdict.prompt)) {
-                        append("open_app", "not confirmed", false)
-                        return Cmd(false, "not_confirmed")
+                    if (verdict is Verdict.Confirm) {
+                        val answer = VoiceController.confirmOutcome(this, verdict.prompt, cancelled = { watch.cancelled() })
+                        if (answer.expired) return expiredCmd(ticket)
+                        if (!answer.accepted) {
+                            append("open_app", "not confirmed", false)
+                            return Cmd(false, "not_confirmed")
+                        }
                     }
                     val consent = { prompt: String ->
                         watch.deferred(AWAITING_OWNER, 0)
-                        VoiceController.confirmBlocking(this, prompt)
+                        val answer = VoiceController.confirmOutcome(this, prompt, cancelled = { watch.cancelled() })
+                        !answer.expired && answer.accepted
                     }
                     val acted = ScreenRouter.open(this, pkg, params, consent = consent, watch = watch)
                     append("open_app", "$pkg ${acted.target.name}", acted.ok)
@@ -562,7 +603,8 @@ class PonySessionService : Service(), RelayClient.Listener {
                     val pkg = params.optString("packageName").takeIf { it.isNotBlank() }
                     val consent = { prompt: String ->
                         watch.deferred(AWAITING_OWNER, 0)
-                        VoiceController.confirmBlocking(this, prompt)
+                        val answer = VoiceController.confirmOutcome(this, prompt, cancelled = { watch.cancelled() })
+                        !answer.expired && answer.accepted
                     }
                     val acted = ScreenRouter.openSettings(this, name, pkg, params, consent = consent, watch = watch)
                     append("open_settings", "$name ${acted.target.name}", acted.ok)
@@ -612,24 +654,33 @@ class PonySessionService : Service(), RelayClient.Listener {
                 "ask_user" -> {
                     val question = params.optString("text")
                     watch.deferred(AWAITING_OWNER, 0)
-                    val answer = VoiceController.askBlocking(this, question)
-                    if (StopState.gate.isStopped()) {
-                        append("ask_user", "stopped", false)
-                        Cmd(false, "stopped")
-                    } else {
-                        append("ask_user", "${question.length} chars", true)
-                        Cmd(true, result = JSONObject().put("text", answer))
+                    val answer = VoiceController.askOutcome(this, question, cancelled = { watch.cancelled() })
+                    when {
+                        answer.expired -> expiredCmd(ticket)
+                        answer.stopped || StopState.gate.isStopped() -> {
+                            append("ask_user", "stopped", false)
+                            Cmd(false, "stopped")
+                        }
+                        else -> {
+                            append("ask_user", "${question.length} chars", true)
+                            Cmd(true, result = JSONObject().put("text", answer.text))
+                        }
                     }
                 }
                 "confirm" -> {
                     val prompt = params.optString("text")
                     watch.deferred(AWAITING_OWNER, 0)
-                    val accepted = VoiceController.confirmBlocking(this, prompt)
-                    append("confirm", "${prompt.take(80)} → ${if (accepted) "yes" else "no"}", accepted)
-                    if (StopState.gate.isStopped()) {
-                        Cmd(false, "stopped", JSONObject().put("accepted", false))
-                    } else {
-                        Cmd(true, result = JSONObject().put("accepted", accepted))
+                    val answer = VoiceController.confirmOutcome(this, prompt, cancelled = { watch.cancelled() })
+                    when {
+                        answer.expired -> expiredCmd(ticket)
+                        answer.stopped || StopState.gate.isStopped() -> {
+                            append("confirm", "${prompt.take(80)} → stopped", false)
+                            Cmd(false, "stopped", JSONObject().put("accepted", false))
+                        }
+                        else -> {
+                            append("confirm", "${prompt.take(80)} → ${if (answer.accepted) "yes" else "no"}", answer.accepted)
+                            Cmd(true, result = JSONObject().put("accepted", answer.accepted))
+                        }
                     }
                 }
                 "done" -> {
@@ -650,7 +701,7 @@ class PonySessionService : Service(), RelayClient.Listener {
     }
 
     /** Calls, pop-ups and Stop reach a waiting command through this. The bot hears about deferrals at once. */
-    private fun remoteWatch(requestId: String) = object : Watch {
+    private fun remoteWatch(requestId: String, ticket: ActionTicket) = object : Watch {
         override fun deferred(reason: String, waitedMs: Long) {
             sendEvent(
                 "progress",
@@ -664,7 +715,8 @@ class PonySessionService : Service(), RelayClient.Listener {
             if (reason != AWAITING_OWNER) TaskRuntime.tracker.setState(TaskState.Waiting, VoiceController.waitingLine(reason))
         }
 
-        override fun cancelled(): Boolean = StopState.gate.isStopped() || ended.get()
+        override fun cancelled(): Boolean =
+            StopState.gate.isStopped() || ended.get() || ActionGate.abandoned(ticket)
     }
 
     /**
@@ -697,7 +749,7 @@ class PonySessionService : Service(), RelayClient.Listener {
 
     private fun limitFor(reason: String): Long = when (reason) {
         DisplayPolicy.CALL_UI_FOREGROUND -> ScreenGuard.callLimitMs
-        AWAITING_OWNER -> OWNER_WAIT_MS
+        AWAITING_OWNER -> ActionExpiry.OWNER_PROMPT_MS
         else -> ScreenGuard.COVER_WAIT_MS
     }
 
@@ -734,18 +786,34 @@ class PonySessionService : Service(), RelayClient.Listener {
         DisplayPolicy.BACKGROUND_REFUSED -> "kept off your screen"
         "password_field" -> "password fields are off limits"
         "stopped" -> "stopped"
+        ActionExpiry.EXPIRED -> "that action expired before it ran"
+        ActionExpiry.SCREEN_CHANGED -> "the screen changed"
         null -> "failed"
         else -> error.replace('_', ' ')
     }
 
-    private fun info(): JSONObject = JSONObject()
-        .put("app", "Pony Companion")
-        .put("version", BuildConfig.VERSION_NAME)
-        .put("versionCode", BuildConfig.VERSION_CODE)
-        .put("features", JSONArray(listOf("resume", "tasks", "done", "deferral", "cover_check", "listen", "ack")))
-        .put("sessionEndsAt", snapshot?.endsAt ?: JSONObject.NULL)
-        .put("now", System.currentTimeMillis())
-        .put("background", VoicePrefs.backgroundMode(this))
+    private fun info(): JSONObject {
+        val ime = ImeStatus.snapshot(this)
+        val foreground = PonyAccessibilityService.instance?.foregroundPackage()
+        return JSONObject()
+            .put("app", "Pony Companion")
+            .put("version", BuildConfig.VERSION_NAME)
+            .put("versionCode", BuildConfig.VERSION_CODE)
+            .put("features", JSONArray(listOf("resume", "tasks", "done", "deferral", "cover_check", "listen", "ack", "action_ttl")))
+            .put("sessionEndsAt", snapshot?.endsAt ?: JSONObject.NULL)
+            .put("now", System.currentTimeMillis())
+            .put("background", VoicePrefs.backgroundMode(this))
+            .put("foreground", foreground ?: JSONObject.NULL)
+            .put(
+                "ime",
+                JSONObject()
+                    .put("current", ime.currentId ?: JSONObject.NULL)
+                    .put("ponyEnabled", ime.ponyEnabled)
+                    .put("ponySelected", ime.ponySelected)
+                    .put("ponyActive", ime.ponyActive)
+                    .put("ponyUsable", ime.ponyUsable),
+            )
+    }
 
     private fun cmdOf(acted: ActionResult): Cmd {
         val body = acted.json()
@@ -946,7 +1014,7 @@ class PonySessionService : Service(), RelayClient.Listener {
 
         /** Progress reason while a command waits for the owner to answer a question on the phone. */
         const val AWAITING_OWNER = "awaiting_owner"
-        const val OWNER_WAIT_MS = 75_000L
+        const val OWNER_WAIT_MS = ActionExpiry.OWNER_PROMPT_MS
 
         /** How often the phone heartbeats while long-polling for the owner's next request. */
         const val WAIT_HEARTBEAT_MS = 12_000L

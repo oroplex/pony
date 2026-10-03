@@ -28,13 +28,21 @@ class PonyDisplayUserService(private val context: Context) : IPonyDisplay.Stub()
 
     override fun ensureDisplay(width: Int, height: Int, density: Int): Int {
         display?.display?.displayId?.let { if (it > 0) return it }
-        val trusted = create(width, height, density, ShellLaunch.displayFlags(trusted = true))
-        isTrusted = trusted != null
-        val created = trusted
-            ?: create(width, height, density, ShellLaunch.displayFlags(trusted = false))
+        val sdk = android.os.Build.VERSION.SDK_INT
+        var created: VirtualDisplay? = null
+        for (flags in ShellLaunch.flagAttempts(trusted = true, sdk)) {
+            created = create(width, height, density, flags)
+            if (created != null) break
+        }
+        isTrusted = created != null
+        created = created
+            ?: create(width, height, density, ShellLaunch.displayFlags(trusted = false, sdk))
             ?: return -1
         display = created
-        if (isTrusted) forceResizable(true)
+        if (isTrusted) {
+            forceResizable(true)
+            setImePolicy(created.display.displayId, ShellLaunch.IME_POLICY_LOCAL)
+        }
         return created.display.displayId
     }
 
@@ -48,6 +56,16 @@ class PonyDisplayUserService(private val context: Context) : IPonyDisplay.Stub()
     override fun pressKey(displayId: Int, keyCode: Int): Boolean {
         if (displayId <= 0 || keyCode <= 0) return false
         return exec(arrayOf("input", "-d", displayId.toString(), "keyevent", keyCode.toString()))
+    }
+
+    override fun topPackage(displayId: Int): String {
+        if (displayId < 0) return ""
+        return ShellLaunch.parseTopPackage(execOut(ShellLaunch.activitiesDumpArgs()), displayId).orEmpty()
+    }
+
+    override fun setImePolicy(displayId: Int, policy: Int): Boolean {
+        if (displayId <= 0) return false
+        return exec(ShellLaunch.imePolicyArgs(displayId, policy))
     }
 
     override fun releaseDisplay() {

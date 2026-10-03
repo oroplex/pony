@@ -7,9 +7,9 @@ Pony is a harness for your Android phone. Claude, Grok, Gemini, OpenAI, or any M
 The agent never needs a vendor SDK. Pony shares the screen, reads the UI tree, and performs the gestures. You choose which model — or which MCP host — is in charge.
 
 - **Site:** [pony.karlmagendavid.com](https://pony.karlmagendavid.com)
-- **APK:** [pony-latest.apk](https://github.com/oroplex/pony/releases/latest/download/pony-latest.apk) (0.6.2, SHA-256 `c64f123b24b8969474ebc117664dbbc4b0420eaa139030fd7b468c5660b697a6`). [latest.json](https://download.pony.karlmagendavid.com/latest.json) always lists the current version and its SHA-256.
+- **APK:** [pony-latest.apk](https://github.com/oroplex/pony/releases/latest/download/pony-latest.apk) (0.6.3 unsigned build from this tree; the owner signs with the release key). [latest.json](https://download.pony.karlmagendavid.com/latest.json) lists the current signed version and its SHA-256.
 - **Code:** [github.com/oroplex/pony](https://github.com/oroplex/pony)
-- **This tree:** 0.6.2 (versionCode 9), MIT licensed
+- **This tree:** 0.6.3 (versionCode 10), MIT licensed
 
 ## What it is
 
@@ -143,14 +143,14 @@ The Android app needs JDK 17 and Android SDK 36 (`platforms;android-36`, `build-
 cd android
 ./gradlew :app:assembleDebug        # app/build/outputs/apk/debug/app-debug.apk
 ./gradlew :app:testDebugUnitTest    # JVM tests and screenshot tests
-./gradlew :app:assembleRelease      # unsigned release APK
+./gradlew :app:assembleRelease      # unsigned release APK (no keystore in this repo)
 ```
 
-Sign a release build with a keystore you control. Never commit the keystore or its password.
+The unsigned artifact is `android/app/build/outputs/apk/release/app-release-unsigned.apk`. Sign it with the existing release key **outside** this repository. Never commit a keystore or its password.
 
 ```bash
 $ANDROID_HOME/build-tools/36.0.0/apksigner sign --ks /path/to/your-release.jks \
-  --out pony-0.6.2.apk app/build/outputs/apk/release/app-release-unsigned.apk
+  --out pony-0.6.3.apk app/build/outputs/apk/release/app-release-unsigned.apk
 ```
 
 Settings → Check for updates reads `https://download.pony.karlmagendavid.com/latest.json` and only installs an APK signed with the same certificate as the app already on the phone. A self-built install will not accept the official update stream.

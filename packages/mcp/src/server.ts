@@ -9,7 +9,7 @@ import type { CommandResult, ProgressEvent, RequestOptions } from "@pony/client"
 
 import { PhoneController, endedMessage, type ControllerOptions, type DisplayOpts } from "./controller.ts";
 
-export const PONY_MCP_VERSION = "0.6.2";
+export const PONY_MCP_VERSION = "0.6.3";
 
 const displayArgs = {
   background: z
@@ -33,7 +33,7 @@ The safety code is empty until the phone finishes the handshake. Call status and
 The phone decides how long a session lasts (30 minutes by default; the owner can pick longer). status shows expiresAt. When it ends, commands are refused. Call pair again.
 The session survives dropped connections. If a command fails with peer_away or connection_lost, wait a few seconds and retry; status.link shows "away" or "reconnecting" until the phone is back. peer_left means the owner ended the session.
 Password fields are refused. Do not try to read or type them.
-type inserts text at the cursor and does not open the keyboard. If method is key_events, warn the user.
+type inserts text at the cursor (mode insert) and does not open the keyboard. Pass mode replace to overwrite the field, or append to add at the end. If method is key_events, warn the user. status reports the active IME and whether the Pony keyboard is usable.
 For setup tasks (keyboard, languages, voice typing, autocorrect), open_settings jumps straight to a settings screen by name — input_method, keyboard_settings (the current keyboard's own options), languages, voice_input, or app_details (with packageName) — so taps don't get lost in menus that swallow touches on protected screens.
 Call disconnect when the user is done.
 The owner can also ask the phone for things, by voice or by typing. Keep calling wait_for_request in a loop while you are available: it returns requestId, text, and source, or {"empty":true}; call it again after empty. When you finish a request, call done with a one-sentence result; the phone shows it and says it for spoken requests. speak says a sentence out loud. ask_user asks and returns what they said. confirm asks for yes or no and returns {"accepted":true|false}. A no is not an error.
@@ -41,7 +41,7 @@ When who or what to act on is ambiguous — a name that matches several contacts
 The phone itself asks before sending, paying, buying, deleting, calling, or changing security settings. Do not bypass that. If the owner taps Stop, commands return stopped until they ask for something new. Call wait_for_request.
 Calls and notifications never cancel a task. While the call screen is in front, the phone holds screen commands until it closes (up to 10 minutes) and reports progress; a pop-up over the target makes it wait up to 3 seconds. It never touches the call screen.
 API keys for on-phone brains stay on the phone. Do not ask for them and do not put them in tool arguments.
-Run in background is on by default on the phone. screenshot, tap, swipe, long_press, drag, pinch, type, key, open_app, open_settings, wait_idle, and ui_tree then target that background display, on the Pony Cloud relay and on a private or Tailscale relay. Omit background and display to follow the phone. Pass display "main" or background false to use the owner's screen. The result includes display, and may include warn. warn "popup_on_main_screen" means the app opened in a pop-up window on the owner's screen because it refused the hidden display.`;
+Run in background is on by default on the phone. screenshot, tap, swipe, long_press, drag, pinch, type, key, open_app, open_settings, wait_idle, and ui_tree then target that background display, on the Pony Cloud relay and on a private or Tailscale relay. Omit background and display to follow the phone. Pass display "main" or background false to use the owner's screen. The result includes display, and may include warn. warn "main_screen" means the app opened full screen on the owner's phone because it refused the hidden display. A timed-out command returns error expired and was not performed.`;
 
 export interface PonyMcp {
   server: McpServer;
@@ -107,7 +107,7 @@ export function createPonyMcp(options: ControllerOptions): PonyMcp {
     {
       title: "Session status",
       description:
-        "Report whether a phone is connected, the safety code, the link state (ready, away, reconnecting, ended), time remaining in the session, whether a standing wait is listening, and the action log. The log records character counts, not typed text.",
+        "Report whether a phone is connected, the safety code, the link state (ready, away, reconnecting, ended), time remaining in the session, whether a standing wait is listening, the action log, and the active keyboard (ime / ponyKeyboardUsable). The log records character counts, not typed text.",
       inputSchema: z.object({}),
     },
     async () => {
@@ -270,10 +270,10 @@ export function createPonyMcp(options: ControllerOptions): PonyMcp {
     {
       title: "Type text",
       description:
-        "Type into the focused field. By default it replaces the field's text — it overwrites whatever is already there, so you don't need to clear it first. Pass mode:\"append\" to add to the end instead. The Pony keyboard is the primary path (method ime) when it owns the field, then ACTION_SET_TEXT. If the phone returns ime_disabled, the owner must enable the Pony keyboard. If it returns ime_required, the keyboard picker is open and they must choose Pony. Clipboard paste (method paste) happens only when the owner turned that setting on. Password fields are refused. If method is key_events, warn the user.",
+        "Type into the focused field. Default mode insert honors the caret and replaces only the current selection — including when Gboard or another keyboard is active and the phone falls back to ACTION_SET_TEXT. Pass mode:\"replace\" to overwrite the whole field, or mode:\"append\" to add at the end. The Pony keyboard is the primary path (method ime) when it owns the field, then set_text. If the phone returns ime_disabled, the owner must enable the Pony keyboard. If it returns ime_required, the keyboard picker is open and they must choose Pony. Clipboard paste (method paste) happens only when the owner turned that setting on. Password fields are refused. If method is key_events, warn the user.",
       inputSchema: z.object({
         text: z.string(),
-        mode: z.enum(["replace", "append"]).optional().describe("replace (default) overwrites the field; append adds to the end."),
+        mode: z.enum(["insert", "replace", "append"]).optional().describe("insert (default) types at the caret; replace overwrites the field; append adds to the end."),
         ...displayArgs,
       }),
     },
@@ -495,6 +495,12 @@ function explain(result: CommandResult): string {
   }
   if (result.error === "not_confirmed") {
     return "The owner did not confirm that action (not_confirmed). Do not retry it unless they ask.";
+  }
+  if (result.error === "expired") {
+    return "That action expired before the phone ran it (expired). It was not performed. Send it again if you still want it.";
+  }
+  if (result.error === "screen_changed") {
+    return "The screen changed since the last look (screen_changed), so the tap was not performed. Read the screen and try again.";
   }
   if (result.error === "in_call") {
     return "A call is on the phone (in_call). Pony will not cover the call. Retry when it ends, or keep the action on the background display.";

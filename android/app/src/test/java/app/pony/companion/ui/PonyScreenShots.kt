@@ -456,8 +456,8 @@ class PonyScreenShots {
     @Composable
     private fun Settings(connected: Boolean = false) = SettingsScreen(
         SettingsState(
-            version = "0.6.2",
-            versionCode = 9,
+            version = "0.6.3",
+            versionCode = 10,
             brainLabel = "Grok Bot",
             connectionLabel = "Pony Cloud",
             sessionLength = SessionLength.TWO_HOURS,

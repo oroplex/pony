@@ -1,14 +1,14 @@
 package app.pony.companion.a11y
 
+enum class TypeMode { INSERT, REPLACE, APPEND }
+
 /**
- * How `type` writes into a focused field. The tool replaces the field's contents:
- * the service selects the whole field first, then commits through the Pony keyboard
- * ([METHOD_IME]), sets the full value with ACTION_SET_TEXT ([METHOD_SET_TEXT]),
- * pastes over the selection ([METHOD_PASTE], opt-in), or overwrites with key events
- * ([METHOD_KEY_EVENTS]) as a last resort.
+ * How `type` writes into a focused field. Default is [TypeMode.INSERT]: honor
+ * the caret and replace only the current selection. [TypeMode.REPLACE]
+ * overwrites the whole field; [TypeMode.APPEND] adds at the end.
  *
- * [fieldValue] and [compose] remain the cursor-aware helpers for reading a field's
- * real text (dropping a hint or placeholder) and inserting at a known selection.
+ * When the Pony keyboard is not the active IME, ACTION_SET_TEXT uses
+ * [targetValue] so it does not wipe the field. [fieldValue] drops a hint.
  */
 object TextEntry {
     const val METHOD_IME = "ime"
@@ -23,6 +23,39 @@ object TextEntry {
         if (showingHint) return null
         if (!hint.isNullOrEmpty() && text == hint) return null
         return text
+    }
+
+    fun parseMode(mode: String?, appendFlag: Boolean): TypeMode = when {
+        appendFlag || mode.equals("append", ignoreCase = true) -> TypeMode.APPEND
+        mode.equals("replace", ignoreCase = true) -> TypeMode.REPLACE
+        else -> TypeMode.INSERT
+    }
+
+    fun wireName(mode: TypeMode): String = when (mode) {
+        TypeMode.INSERT -> "insert"
+        TypeMode.REPLACE -> "replace"
+        TypeMode.APPEND -> "append"
+    }
+
+    /**
+     * The string ACTION_SET_TEXT should write. Insert honors the caret;
+     * replace is the whole new value; append is existing + insert.
+     */
+    fun targetValue(
+        mode: TypeMode,
+        existing: String?,
+        hint: String?,
+        showingHint: Boolean,
+        selectionStart: Int,
+        selectionEnd: Int,
+        insert: String,
+    ): String {
+        val field = fieldValue(existing, hint, showingHint) ?: ""
+        return when (mode) {
+            TypeMode.REPLACE -> insert
+            TypeMode.APPEND -> field + insert
+            TypeMode.INSERT -> compose(field, selectionStart, selectionEnd, insert)
+        }
     }
 
     fun compose(existing: String?, selectionStart: Int, selectionEnd: Int, insert: String): String {

@@ -256,13 +256,13 @@ class PonyAccessibilityService : AccessibilityService() {
     }
 
     /**
-     * Replaces the focused field's text. Pony selects the whole field, then writes
-     * the new value through the keyboard, ACTION_SET_TEXT, paste (opt-in), or key
-     * events. Password fields fail closed.
+     * Writes into the focused field. Default [TypeMode.INSERT] honors the caret.
+     * When the Pony keyboard is not the active IME, ACTION_SET_TEXT composes
+     * around the selection instead of wiping the field.
      */
-    fun typeText(text: String, append: Boolean = false, displayId: Int = Display.DEFAULT_DISPLAY): Result<TypedText> {
-        if (displayId != Display.DEFAULT_DISPLAY) return typeOnDisplay(text, append, displayId)
-        val replace = !append
+    fun typeText(text: String, mode: TypeMode = TypeMode.INSERT, displayId: Int = Display.DEFAULT_DISPLAY): Result<TypedText> {
+        if (displayId != Display.DEFAULT_DISPLAY) return typeOnDisplay(text, mode, displayId)
+        val replace = mode == TypeMode.REPLACE
         val focused = focusedEditableIn(Display.DEFAULT_DISPLAY)
         var askedToSwitch = false
         ImeBridge.prepareToType()
@@ -283,12 +283,13 @@ class PonyAccessibilityService : AccessibilityService() {
                     TypeRoute.IME -> {
                         setTypingKeyboardHidden(false)
                         if (replace) focused?.let { selectAll(it) }
+                        if (mode == TypeMode.APPEND) focused?.let { selectEnd(it) }
                         if (finishImeCommit(text, switchBack = false)) {
                             return Result.success(TypedText(text.length, TextEntry.METHOD_IME))
                         }
                     }
                     TypeRoute.SET_TEXT -> {
-                        val value = if (append && focused != null) focused.text?.toString().orEmpty() + text else text
+                        val value = fieldTarget(focused, mode, text)
                         if (focused != null && setText(focused, value)) {
                             return Result.success(TypedText(text.length, TextEntry.METHOD_SET_TEXT))
                         }
@@ -311,6 +312,7 @@ class PonyAccessibilityService : AccessibilityService() {
                         }
                         if (ImeBridge.password) return Result.failure(SecurityException("password_field"))
                         if (replace) focused?.let { selectAll(it) }
+                        if (mode == TypeMode.APPEND) focused?.let { selectEnd(it) }
                         if (finishImeCommit(text, switchBack = askedToSwitch)) {
                             return Result.success(TypedText(text.length, TextEntry.METHOD_IME))
                         }
@@ -322,6 +324,7 @@ class PonyAccessibilityService : AccessibilityService() {
                     }
                     TypeRoute.KEY_EVENTS -> {
                         if (replace) focused?.let { selectAll(it) }
+                        if (mode == TypeMode.APPEND) focused?.let { selectEnd(it) }
                         if (injectKeyEvents(text)) {
                             return Result.success(TypedText(text.length, TextEntry.METHOD_KEY_EVENTS))
                         }
@@ -371,11 +374,35 @@ class PonyAccessibilityService : AccessibilityService() {
     private fun selectAll(node: AccessibilityNodeInfo) {
         val len = node.text?.length ?: return
         if (len <= 0) return
+        setSelection(node, 0, len)
+    }
+
+    private fun selectEnd(node: AccessibilityNodeInfo) {
+        val len = node.text?.length ?: return
+        setSelection(node, len, len)
+    }
+
+    private fun setSelection(node: AccessibilityNodeInfo, start: Int, end: Int) {
         val args = Bundle().apply {
-            putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, 0)
-            putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, len)
+            putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, start)
+            putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, end)
         }
         runCatching { node.performAction(AccessibilityNodeInfo.ACTION_SET_SELECTION, args) }
+    }
+
+    private fun fieldTarget(node: AccessibilityNodeInfo?, mode: TypeMode, insert: String): String {
+        if (node == null) return insert
+        val hint = node.hintText?.toString()
+        val showing = if (Build.VERSION.SDK_INT >= 26) node.isShowingHintText else false
+        return TextEntry.targetValue(
+            mode,
+            node.text?.toString(),
+            hint,
+            showing,
+            node.textSelectionStart,
+            node.textSelectionEnd,
+            insert,
+        )
     }
 
     private fun showImePicker() {
@@ -675,6 +702,18 @@ class PonyAccessibilityService : AccessibilityService() {
                 packageName = pkg,
                 focused = window.isFocused,
             )
+        }
+    }
+
+    /** True when accessibility has this display in [windowsOnAllDisplays] (API 30+). */
+    fun seesDisplay(displayId: Int): Boolean {
+        if (displayId == Display.DEFAULT_DISPLAY) return true
+        if (Build.VERSION.SDK_INT < 30) return false
+        return try {
+            val displays = windowsOnAllDisplays ?: return false
+            displays.indexOfKey(displayId) >= 0
+        } catch (_: Throwable) {
+            false
         }
     }
 
@@ -1025,7 +1064,7 @@ class PonyAccessibilityService : AccessibilityService() {
         }
     }
 
-    private fun typeOnDisplay(text: String, append: Boolean, displayId: Int): Result<TypedText> {
+    private fun typeOnDisplay(text: String, mode: TypeMode, displayId: Int): Result<TypedText> {
         val focused = roots(displayId).let { nodes ->
             val found = nodes.firstNotNullOfOrNull { UiTreeDumper.focusedEditable(it) }
             nodes.forEach { runCatching { it.recycle() } }
@@ -1035,7 +1074,7 @@ class PonyAccessibilityService : AccessibilityService() {
             if (focused != null && TextEntry.isPasswordField(focused.isPassword, focused.inputType)) {
                 return Result.failure(SecurityException("password_field"))
             }
-            val value = if (append && focused != null) focused.text?.toString().orEmpty() + text else text
+            val value = fieldTarget(focused, mode, text)
             if (focused != null && setText(focused, value)) {
                 Result.success(TypedText(text.length, TextEntry.METHOD_SET_TEXT))
             } else {

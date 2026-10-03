@@ -70,6 +70,24 @@ object ShizukuBridge {
         }
     }
 
+    fun topPackage(context: Context, displayId: Int): String? {
+        val service = remote.get() ?: bind(context) ?: return null
+        return try {
+            service.topPackage(displayId).takeIf { it.isNotBlank() }
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
+    fun setImePolicy(context: Context, displayId: Int, policy: Int = ShellLaunch.IME_POLICY_LOCAL): Boolean {
+        val service = remote.get() ?: bind(context) ?: return false
+        return try {
+            service.setImePolicy(displayId, policy)
+        } catch (_: Throwable) {
+            false
+        }
+    }
+
     fun pressKey(context: Context, displayId: Int, keyCode: Int): Boolean {
         if (!granted()) return false
         val service = remote.get() ?: bind(context) ?: return false

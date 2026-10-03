@@ -8,6 +8,7 @@ import app.pony.companion.a11y.PonyAccessibilityService
 import app.pony.companion.a11y.RetryLadder
 import app.pony.companion.a11y.TapStrategy
 import app.pony.companion.a11y.TextEntry
+import app.pony.companion.a11y.TypeMode
 import app.pony.companion.intent.ImeSettings
 import app.pony.companion.intent.SettingsIntents
 import org.json.JSONObject
@@ -52,6 +53,8 @@ object ScreenRouter {
         return work(context, "Tapping") {
             val target = targetFor(context, params)
             val a11y = PonyAccessibilityService.instance ?: return@work off(target)
+            val fingerprint = screenFingerprint(a11y, target, params)
+            if (fingerprint != null) return@work fingerprint
             val px = axis(x, target.width)
             val py = axis(y, target.height)
             val guard = guardTouch(context, a11y, target, px, py, watch)
@@ -220,15 +223,24 @@ object ScreenRouter {
     }
 
     fun type(context: Context, text: String, append: Boolean, params: JSONObject?, watch: Watch = Watch.None): ActionResult {
+        val mode = TextEntry.parseMode(params?.optString("mode"), append)
+        return type(context, text, mode, params, watch)
+    }
+
+    fun type(context: Context, text: String, mode: TypeMode, params: JSONObject?, watch: Watch = Watch.None): ActionResult {
         return work(context, "Typing") {
             val target = targetFor(context, params)
             val a11y = PonyAccessibilityService.instance ?: return@work off(target)
             val guard = guardTouch(context, a11y, target, null, null, watch)
             if (!guard.ok) return@work guard.failure(target)
-            val typed = a11y.typeText(text, append, target.displayId)
+            val typed = a11y.typeText(text, mode, target.displayId)
             typed.fold(
                 onSuccess = {
-                    val fields = mutableMapOf<String, Any?>("length" to it.length, "method" to it.method)
+                    val fields = mutableMapOf<String, Any?>(
+                        "length" to it.length,
+                        "method" to it.method,
+                        "mode" to TextEntry.wireName(mode),
+                    )
                     fields += guard.extra()
                     val warned = if (it.method == TextEntry.METHOD_KEY_EVENTS) {
                         target.copy(warn = target.warn ?: "key_events", warnText = TextEntry.KEY_EVENT_WARNING)
@@ -344,8 +356,9 @@ object ScreenRouter {
             val a11y = PonyAccessibilityService.instance ?: return@work off(target)
             val hidden = if (target.displayId == Display.DEFAULT_DISPLAY) CallGuard.protectedPackages(context) else emptySet()
             val text = a11y.uiTree(target.displayId, hidden)
-            if (target.displayId == Display.DEFAULT_DISPLAY) expected = a11y.foregroundPackage(target.displayId) ?: expected
-            ActionResult(true, null, target, mapOf("tree" to text) + windowFields(a11y, target, null, null))
+            val pkg = a11y.foregroundPackage(target.displayId)
+            if (target.displayId == Display.DEFAULT_DISPLAY) expected = pkg ?: expected
+            ActionResult(true, null, target, mapOf("tree" to text, "foreground" to pkg) + windowFields(a11y, target, null, null))
         }
     }
 
@@ -354,7 +367,8 @@ object ScreenRouter {
             val target = targetFor(context, params)
             val a11y = PonyAccessibilityService.instance ?: return@work off(target)
             val jpeg = a11y.screenshotJpeg(target.displayId).getOrNull()
-            if (target.displayId == Display.DEFAULT_DISPLAY) expected = a11y.foregroundPackage(target.displayId) ?: expected
+            val pkg = a11y.foregroundPackage(target.displayId)
+            if (target.displayId == Display.DEFAULT_DISPLAY) expected = pkg ?: expected
             if (jpeg == null || jpeg.isEmpty()) {
                 if (target.displayId != Display.DEFAULT_DISPLAY) {
                     // The hidden display exists but nothing has been launched on it, so the
@@ -372,6 +386,7 @@ object ScreenRouter {
                         "jpeg" to jpeg,
                         "width" to target.width,
                         "height" to target.height,
+                        "foreground" to pkg,
                     ),
                 )
             }
@@ -405,11 +420,27 @@ object ScreenRouter {
     }
 
     fun targetFor(context: Context, params: JSONObject?): ScreenTarget {
-        return BackgroundHost.resolve(context, DisplayPolicy.choiceFrom(context, params))
+        return BackgroundHost.resolve(
+            context,
+            DisplayPolicy.choiceFrom(context, params),
+            explicitBackground = DisplayPolicy.requestedBackground(params),
+        )
     }
 
     fun expectPackage(packageName: String?) {
         expected = packageName
+    }
+
+    private fun screenFingerprint(a11y: PonyAccessibilityService, target: ScreenTarget, params: JSONObject?): ActionResult? {
+        val wanted = params?.optString("screenPkg")?.takeIf { it.isNotBlank() } ?: return null
+        val actual = a11y.foregroundPackage(target.displayId)
+        if (!app.pony.companion.session.ActionExpiry.screenChanged(wanted, actual)) return null
+        return ActionResult(
+            false,
+            app.pony.companion.session.ActionExpiry.SCREEN_CHANGED,
+            target,
+            mapOf("screenPkg" to wanted, "foreground" to actual),
+        )
     }
 
     private data class Guarded(val ok: Boolean, val error: String? = null, val deferredMs: Long = 0L, val coveredBy: String? = null, val waitedMs: Long = 0L) {

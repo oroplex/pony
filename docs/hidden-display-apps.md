@@ -7,9 +7,9 @@ whether **Shizuku** is turned on. This page is the honest matrix.
 
 Pony never guesses. After it opens an app it watches, for up to three
 seconds, whether that app actually leads the hidden display. If it does
-not, Pony falls back (with your permission) and every later step says
-**"freeform"** or **"main"** instead of **"background"**, so the placement
-you see is always the real one.
+not, Pony falls back (with your permission) and later steps target **"main"**
+instead of **"background"**. The bounce warning is only on that open, so a
+later Home press does not still name the app that refused.
 
 ## The two modes
 
@@ -31,8 +31,11 @@ the "force resizable activities" developer setting so portrait‑locked apps
 still open there, and restores it afterward. This is the mode that makes the
 hidden screen broadly useful. The shell can create a trusted display on
 Android 16, Android 14 and older, and custom ROMs that grant the shell the
-display permissions. If it can't on your phone, Pony doesn't launch other apps
-on the shell display and falls back exactly as in the default mode.
+display permissions. On Android 17 / One UI 9 the trusted display is created
+in its own display group so foreign activities stay there instead of bouncing
+to a freeform window on the main screen; Android 11–16 keep the previous
+flags. If it can't on your phone, Pony doesn't launch other apps on the
+shell display and falls back full-screen (not freeform) on the main display.
 
 ## Matrix by category
 
@@ -71,10 +74,11 @@ landing at runtime rather than trusting a list.
 Pony asks first (unless you set a standing choice in Settings → **Apps that
 can't work out of sight**: *Ask me each time*, *Use a pop‑up window*, or
 *Never use my screen*). If you allow it, Pony prefers a
-**freeform pop‑up** on phones that support one (Samsung pop‑up view or the
-platform freeform feature) before taking over the full main screen, and it
-tells you which happened. Choosing *Never use my screen* means a refusing app is reported
-as blocked instead of ever touching your screen.
+**full-screen window** on the main display — not a freeform / Samsung pop-up,
+whose chrome was taller than the panel on the Galaxy S26 Ultra. Choosing
+*Never use my screen* means a refusing app is reported as blocked instead of
+ever touching your screen. The warning is only on that open, so a later Home
+press does not still name the app that bounced.
 
 ## Getting the widest coverage
 
