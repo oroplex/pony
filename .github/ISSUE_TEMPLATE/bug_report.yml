@@ -1,0 +1,94 @@
+name: Bug report
+description: Something on the phone or in the MCP server did not work as expected
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks. Phone model, Android version, and One UI (if this is a Samsung) are the difference between a guess and a fix. Pony is a sideloaded Accessibility app — install and Play Protect problems count as bugs too.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you saw, in plain language. Include the exact wording of any prompt, warning, or error.
+      placeholder: Pony asked “Pay?” on a Settings screen / the Accessibility switch stayed grey / Claude Desktop never got a screenshot…
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Numbered steps, starting from a cold Pony or a fresh pair if that matters.
+      placeholder: |
+        1. Install pony-latest.apk from the latest GitHub release
+        2. Enable Pony control in Settings › Accessibility
+        3. …
+    validations:
+      required: true
+
+  - type: input
+    id: pony-version
+    attributes:
+      label: Pony version
+      description: Settings › About, or the GitHub release you installed (for example 0.6.4).
+      placeholder: 0.6.4
+    validations:
+      required: true
+
+  - type: input
+    id: phone-model
+    attributes:
+      label: Phone model
+      description: Marketing name is fine (for example Galaxy S26 Ultra, Pixel 9, Pixel 8a).
+      placeholder: Galaxy S26 Ultra
+    validations:
+      required: true
+
+  - type: input
+    id: android-version
+    attributes:
+      label: Android version
+      description: Settings › About phone. Pony’s minimum is Android 10 (minSdk 29).
+      placeholder: Android 16
+    validations:
+      required: true
+
+  - type: input
+    id: one-ui
+    attributes:
+      label: One UI version (Samsung) or other skin
+      description: Samsung — Settings › About phone › One UI version. Other OEMs — ColorOS, HyperOS, Nothing OS, stock Pixel, and so on. Leave blank only if you truly do not know.
+      placeholder: One UI 8.0 / stock Pixel
+    validations:
+      required: false
+
+  - type: dropdown
+    id: brain
+    attributes:
+      label: How the brain was connected
+      options:
+        - On-phone API key (Claude / Gemini / OpenAI / xAI / OpenRouter / custom)
+        - MCP (Claude Desktop)
+        - MCP (Claude Code)
+        - MCP (Cursor or another host)
+        - Grok Bot template
+        - Not sure / not relevant
+    validations:
+      required: true
+
+  - type: textarea
+    id: extras
+    attributes:
+      label: Extra detail
+      description: Screenshot of the warning, `adb logcat` snippet, MCP host log, or SHA-256 of the APK you installed. Do not paste API keys.
+      render: text
