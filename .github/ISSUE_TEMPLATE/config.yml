@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Pony site
+    url: https://pony.karlmagendavid.com
+    about: Product page and install walkthrough (source is not in this repo).
+  - name: Latest signed APK
+    url: https://github.com/oroplex/pony/releases/latest/download/pony-latest.apk
+    about: Download the current signed release.

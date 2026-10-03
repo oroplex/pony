@@ -1,0 +1,55 @@
+name: Feature request
+description: A capability Pony does not have yet, or a first-run / safety change
+title: "[Feature]: "
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Say what a person does today, what they want instead, and why the safety model still holds. Pony asks before send / pay / delete / call; money screens confirm every tap; password fields stay off-limits.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What is awkward, missing, or unsafe today?
+      placeholder: I re-type the same “reorder my usual Postmates” ask every Friday…
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you want instead
+      description: The smallest change that would fix it. A sentence is better than a design doc.
+    validations:
+      required: true
+
+  - type: textarea
+    id: safety
+    attributes:
+      label: Safety
+      description: Does this still stop for send / pay / delete / call? Does a money screen still confirm every tap? Are password fields still refused?
+      placeholder: Replay still goes through SafetyPolicy. No new way to type into a password field.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Android app
+        - MCP server / clients
+        - Safety / money screens
+        - Docs / first-run / Play Protect
+        - Relay / pairing
+        - Not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: extras
+    attributes:
+      label: Extra detail
+      description: Phone model, Android version, and One UI if the idea is OEM-specific. Links to similar apps are fine.
