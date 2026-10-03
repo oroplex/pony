@@ -1,5 +1,7 @@
 package app.pony.companion.voice
 
+import java.util.regex.Pattern
+
 /** What Pony learned about the control under a tap. */
 data class TapTarget(
     val label: String,
@@ -40,8 +42,11 @@ sealed class Verdict {
 object SafetyPolicy {
     private data class Rule(val pattern: Regex, val cjk: List<String>, val prompt: String, val reason: String)
 
-    private fun words(vararg alternatives: String) =
-        Regex("\\b(${alternatives.joinToString("|")})\\b", RegexOption.IGNORE_CASE)
+    private fun words(vararg alternatives: String): Regex =
+        Pattern.compile(
+            "\\b(${alternatives.joinToString("|")})\\b",
+            Pattern.CASE_INSENSITIVE or Pattern.UNICODE_CASE or Pattern.UNICODE_CHARACTER_CLASS,
+        ).toRegex()
 
     /**
      * English plus es, de, fr, pt, he, hi, ar, zh, ja (and ko as a backstop).
