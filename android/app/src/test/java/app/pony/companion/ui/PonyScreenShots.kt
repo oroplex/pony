@@ -445,7 +445,7 @@ class PonyScreenShots {
     private fun Ask(state: AskState) = AskScreen(state, "", {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, shotFile = { _, _ -> fakeShot })
 
     @Composable
-    private fun Pair(state: PairState) = PairScreen(state, {}, {}, {}, {}, {}, {}, {}, scanner = {})
+    private fun Pair(state: PairState) = PairScreen(state, {}, {}, {}, {}, {}, {}, onBack = {}, scanner = {})
 
     @Composable
     private fun Brains(providers: List<ProviderRecord>, grokSelected: Boolean = true) = BrainsScreen(
