@@ -28,6 +28,7 @@ The first list under each version is what the phone shows in **Check for updates
 
 **Release**
 - App and MCP are 0.6.3 (versionCode 10). CI builds an **unsigned** release APK (`:app:assembleRelease` → `app/build/outputs/apk/release/app-release-unsigned.apk`). Sign it with the existing private key outside this repo. No keystore is created or committed.
+- CI's Android job uses `android-actions/setup-android@v4` with `packages: platform-tools`. The v3 default still asked sdkmanager for the legacy `tools` package, which Google removed from the SDK repository, so the job never reached Gradle.
 
 ## 0.6.2
 
