@@ -32,7 +32,8 @@ describe("action TTL", () => {
   it("uses the receive time when the client stamp is missing, and rejects a skewed stamp", () => {
     expect(effectiveIssuedAt(undefined, 9_000)).toBe(9_000);
     expect(effectiveIssuedAt(8_500, 9_000)).toBe(8_500);
-    expect(() => effectiveIssuedAt(9_000 - 200_000, 9_000)).toThrow("clock_skew");
+    expect(() => effectiveIssuedAt(9_000 + 200_000, 9_000)).toThrow("clock_skew");
+    expect(() => effectiveIssuedAt(1_000, 201_000)).toThrow("clock_skew");
   });
 
   it("refuses a tap when the named screen is no longer in front", () => {

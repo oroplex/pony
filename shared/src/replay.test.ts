@@ -13,6 +13,18 @@ describe("DirectionCounter", () => {
     expect(recv.lastReceived()).toBe(2);
   });
 
+  it("restores counters so a restarted peer does not rewind", () => {
+    const live = new DirectionCounter();
+    live.nextSend();
+    live.nextSend();
+    live.accept(4);
+    const copy = new DirectionCounter();
+    copy.restore(live.snapshot().send, live.snapshot().recv);
+    expect(copy.nextSend()).toBe(3);
+    expect(copy.accept(4)).toBe(false);
+    expect(copy.accept(5)).toBe(true);
+  });
+
   it("rejects a reused or rewound seq", () => {
     const recv = new DirectionCounter();
     expect(recv.accept(3)).toBe(true);

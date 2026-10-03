@@ -24,6 +24,15 @@ class DirectionCounter {
 
     @Synchronized
     fun lastReceived(): Long = recv
+
+    @Synchronized
+    fun lastSent(): Long = send
+
+    @Synchronized
+    fun restore(sent: Long, received: Long) {
+        send = if (sent > 0L) sent else 0L
+        recv = if (received > 0L) received else 0L
+    }
 }
 
 class ExecutedIds(private val limit: Int = 4_096) {

@@ -397,6 +397,13 @@ export async function runListen(options: ListenOptions): Promise<ListenHandle> {
     async stop() {
       stopped = true;
       listener?.dispose();
+      if (live.keys) {
+        try {
+          store.save(live.save());
+        } catch {
+          /* next run may have to pair again */
+        }
+      }
       live.close();
       await finished;
     },

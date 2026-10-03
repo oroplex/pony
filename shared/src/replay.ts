@@ -7,6 +7,20 @@ export class DirectionCounter {
   private send = 0;
   private recv = 0;
 
+  constructor(send = 0, recv = 0) {
+    this.send = send;
+    this.recv = recv;
+  }
+
+  restore(send: number, recv: number): void {
+    this.send = Number.isSafeInteger(send) && send > 0 ? send : 0;
+    this.recv = Number.isSafeInteger(recv) && recv > 0 ? recv : 0;
+  }
+
+  snapshot(): { send: number; recv: number } {
+    return { send: this.send, recv: this.recv };
+  }
+
   nextSend(): number {
     this.send += 1;
     return this.send;

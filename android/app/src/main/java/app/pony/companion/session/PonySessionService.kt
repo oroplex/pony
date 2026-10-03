@@ -219,6 +219,8 @@ class PonySessionService : Service(), RelayClient.Listener {
         snapshot = saved
         ownerConfirmed = saved.ownerConfirmed
         protocolVersion = saved.protocolVersion
+        sendCounter.restore(saved.sendSeq, 0)
+        recvCounter.restore(0, saved.recvSeq)
         SessionRepository.update {
             it.copy(
                 connection = Connection.Reconnecting,
@@ -396,6 +398,7 @@ class PonySessionService : Service(), RelayClient.Listener {
             append("decrypt", "replayed", false)
             return
         }
+        persistCounters()
         val obj = try {
             JSONObject(String(decoded.plaintext))
         } catch (e: Exception) {
@@ -916,7 +919,15 @@ class PonySessionService : Service(), RelayClient.Listener {
     private fun send(message: AppMessage): Boolean {
         val sessionKeys = keys ?: return false
         val seq = if (protocolVersion >= 2) sendCounter.nextSend() else null
+        persistCounters()
         return runCatching { relay?.sendMessage(sessionKeys.send, message, seq) == true }.getOrDefault(false)
+    }
+
+    private fun persistCounters() {
+        val current = snapshot ?: return
+        val next = current.copy(sendSeq = sendCounter.lastSent(), recvSeq = recvCounter.lastReceived())
+        snapshot = next
+        vault.save(next)
     }
 
     private fun sendEvent(op: String, result: JSONObject) {

@@ -17,6 +17,19 @@ class ReplayGuardTest {
     }
 
     @Test
+    fun restoreContinuesFromTheSavedCounters() {
+        val live = DirectionCounter()
+        live.nextSend()
+        live.nextSend()
+        live.accept(4)
+        val copy = DirectionCounter()
+        copy.restore(live.lastSent(), live.lastReceived())
+        assertEquals(3L, copy.nextSend())
+        assertFalse(copy.accept(4))
+        assertTrue(copy.accept(5))
+    }
+
+    @Test
     fun remembersAnExecutedCommandId() {
         val seen = ExecutedIds()
         assertTrue(seen.remember("tap-1"))

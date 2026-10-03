@@ -411,6 +411,13 @@ export class PhoneController {
 
   /** Leaves the relay without ending the session. With a state file, the next start rejoins it. */
   detach(): void {
+    if (this.store && this.session?.keys) {
+      try {
+        this.store.save(this.session.save());
+      } catch {
+        /* next start may have to pair again */
+      }
+    }
     this.disposeListener();
     this.releaseWaiters();
     this.unsubscribe?.();

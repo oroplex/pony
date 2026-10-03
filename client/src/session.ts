@@ -100,6 +100,9 @@ export interface SavedSession {
   clientName?: string;
   pairedAt: number;
   ownerConfirmed?: boolean;
+  /** Last per-direction AEAD counters. Restored so a restart does not rewind seq. */
+  sendSeq?: number;
+  recvSeq?: number;
 }
 
 interface Pending {
@@ -261,6 +264,8 @@ export class PonySession {
     session.peerKey = checked.peerKey;
     session.pairedAt = checked.pairedAt;
     session.ownerConfirmed = checked.ownerConfirmed === true;
+    session.sendCounter.restore(checked.sendSeq ?? 0, 0);
+    session.recvCounter.restore(0, checked.recvSeq ?? 0);
     session.established = true;
     session.wsUrl = socketPath(opts.socketUrl ?? checked.socketUrl);
     session.dial().catch(() => undefined);
@@ -319,6 +324,8 @@ export class PonySession {
       ...(this.clientName ? { clientName: this.clientName } : {}),
       pairedAt: this.pairedAt ?? Date.now(),
       ownerConfirmed: this.ownerConfirmed,
+      sendSeq: this.sendCounter.snapshot().send,
+      recvSeq: this.recvCounter.snapshot().recv,
     };
   }
 
@@ -750,13 +757,17 @@ export class PonySession {
       return;
     }
     if (this.clientName && this.keys) {
-      const seq = usesReplayProtection(this.payload.v) ? this.sendCounter.nextSend() : undefined;
-      ws.send(
-        JSON.stringify({
-          type: "fwd",
-          data: encryptJson(this.keys.send, { type: "intro", client: this.clientName }, seq),
-        }),
-      );
+      try {
+        const seq = usesReplayProtection(this.payload.v) ? this.sendCounter.nextSend() : undefined;
+        ws.send(
+          JSON.stringify({
+            type: "fwd",
+            data: encryptJson(this.keys.send, { type: "intro", client: this.clientName }, seq),
+          }),
+        );
+      } catch {
+        /* name is cosmetic; the session is still ready */
+      }
     }
     this.setState("ready", { reason: this.protocolTooOld ? UPDATE_PONY : undefined });
   }

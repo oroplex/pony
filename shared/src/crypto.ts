@@ -48,7 +48,7 @@ export function b64urlEncode(bytes: Uint8Array): string {
 
 export function b64urlDecode(s: string): Uint8Array {
   const pad = "=".repeat((4 - (s.length % 4)) % 4);
-  const b64 = s.replaceAll("-", "+").replaceAll("/", "_") + pad;
+  const b64 = s.replaceAll("-", "+").replaceAll("_", "/") + pad;
   const bin = atob(b64);
   const out = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
