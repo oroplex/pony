@@ -19,6 +19,8 @@ export interface Room {
   resume: { bot: boolean; phone: boolean };
   /** Set from the bot hello. Omitted on the wire when empty. */
   clientName?: string;
+  /** IP that created the pairing token via POST /pair. Used for per-IP caps. */
+  createdByIp?: string;
 }
 
 export type RoomError =
@@ -67,11 +69,27 @@ export class PairingHub {
     this.maxRoomMs = options.maxRoomMs ?? MAX_ROOM_MS;
   }
 
-  createToken(token: string): { token: string; expiresAt: number } {
+  createToken(token: string, createdByIp?: string): { token: string; expiresAt: number } {
     this.gc();
     const createdAt = this.now();
-    this.rooms.set(token, { token, createdAt, lastSeenAt: createdAt, resume: { bot: false, phone: false } });
+    this.rooms.set(token, {
+      token,
+      createdAt,
+      lastSeenAt: createdAt,
+      resume: { bot: false, phone: false },
+      createdByIp,
+    });
     return { token, expiresAt: createdAt + this.ttlMs };
+  }
+
+  /** Rooms still on the books that this IP created. Call after gc(). */
+  countForIp(ip: string): number {
+    if (!ip) return 0;
+    let n = 0;
+    for (const room of this.rooms.values()) {
+      if (room.createdByIp === ip) n++;
+    }
+    return n;
   }
 
   join(token: string, role: Role, socket: PeerSocket, resume = false): Joined | { error: RoomError } {
