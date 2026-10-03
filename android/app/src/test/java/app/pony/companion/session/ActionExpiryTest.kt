@@ -29,10 +29,10 @@ class ActionExpiryTest {
     }
 
     @Test
-    fun receiveTimeIsUsedWhenTheClientStampIsMissingOrSkewed() {
+    fun receiveTimeIsUsedWhenTheClientStampIsMissingAndASkewedStampIsRejected() {
         assertEquals(9_000L, ActionExpiry.effectiveIssuedAt(null, 9_000))
         assertEquals(8_500L, ActionExpiry.effectiveIssuedAt(8_500, 9_000))
-        assertEquals(9_000L, ActionExpiry.effectiveIssuedAt(9_000 - 200_000, 9_000))
+        assertTrue(ActionExpiry.resolveIssuedAt(9_000 - 200_000, 9_000) is ActionExpiry.IssuedAt.Skewed)
     }
 
     @Test

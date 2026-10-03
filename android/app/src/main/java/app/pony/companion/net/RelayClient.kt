@@ -63,8 +63,6 @@ class RelayClient(
                     "waiting" -> Unit
                     "ready" -> {
                         listener.onRelayReady(obj.optBoolean("resumed", false))
-                        val client = obj.optString("client")
-                        if (client.isNotBlank()) listener.onClientName(client)
                         listener.onPlainHandshakeNeeded()
                     }
                     "fwd" -> listener.onFrame(obj.optString("data"))
@@ -90,10 +88,11 @@ class RelayClient(
         })
     }
 
-    fun sendHandshake(publicKey: ByteArray) {
+    fun sendHandshake(publicKey: ByteArray, protocolVersion: Int = app.pony.companion.proto.PROTOCOL_VERSION) {
         val inner = JSONObject()
             .put("type", "hs")
             .put("pk", SessionCrypto.b64urlEncode(publicKey))
+            .put("v", protocolVersion)
         sendRaw(JSONObject().put("type", "fwd").put("data", inner.toString()).toString())
     }
 
@@ -101,8 +100,9 @@ class RelayClient(
         sendRaw(JSONObject().put("type", "fwd").put("data", payloadB64).toString())
 
     /** False when the socket is already gone, so the frame never left the phone. */
-    fun sendMessage(keysSend: ByteArray, message: AppMessage): Boolean {
-        val cipher = SessionCrypto.encrypt(keysSend, message.toJson().toString().toByteArray())
+    fun sendMessage(keysSend: ByteArray, message: AppMessage, seq: Long? = null): Boolean {
+        val body = if (seq != null) message.copy(seq = seq) else message
+        val cipher = SessionCrypto.encrypt(keysSend, body.toJson().toString().toByteArray(), seq)
         return sendEncrypted(SessionCrypto.b64urlEncode(cipher))
     }
 

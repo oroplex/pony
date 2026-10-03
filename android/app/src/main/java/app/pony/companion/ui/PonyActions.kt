@@ -16,6 +16,7 @@ class PonyActions(
     val openInstallPermission: () -> Unit = {},
     val pair: (String) -> Unit = {},
     val usePending: () -> Unit = {},
+    val confirmPair: () -> Unit = {},
     val disconnect: () -> Unit = {},
     val reconnect: () -> Unit = {},
     val retry: () -> Unit = {},

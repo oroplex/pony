@@ -84,7 +84,7 @@ describe("relay http + websocket", () => {
     expect(await reply).toEqual({ type: "error", reason: "expired_token" });
   });
 
-  it("forwards the bot client name on ready when one was sent", async () => {
+  it("does not put the bot client name on ready", async () => {
     relay = await createRelay({ host: "127.0.0.1", port: 0 });
     const pairRes = await fetch(`${relay.url}/pair`, { method: "POST" });
     const pair = (await pairRes.json()) as { token: string; wsUrl: string };
@@ -96,8 +96,31 @@ describe("relay http + websocket", () => {
     const botReady = onceJson(bot);
     const phoneReady = onceJson(phone);
     phone.send(JSON.stringify({ type: "hello", role: "phone", token: pair.token }));
-    expect(await botReady).toEqual({ type: "ready", role: "bot", client: "Grok Bot" });
-    expect(await phoneReady).toEqual({ type: "ready", role: "phone", client: "Grok Bot" });
+    expect(await botReady).toEqual({ type: "ready", role: "bot" });
+    expect(await phoneReady).toEqual({ type: "ready", role: "phone" });
+  });
+
+  it("closes a socket that never sends a valid hello", async () => {
+    relay = await createRelay({ host: "127.0.0.1", port: 0, helloDeadlineMs: 80 });
+    const pairRes = await fetch(`${relay.url}/pair`, { method: "POST" });
+    const pair = (await pairRes.json()) as { token: string; wsUrl: string };
+    const silent = await connect(pair.wsUrl);
+    const closed = onceClose(silent);
+    const result = await closed;
+    expect(result.code).toBe(4003);
+    expect(result.reason).toContain("hello_timeout");
+  });
+
+  it("keeps a socket that hellos before the deadline", async () => {
+    relay = await createRelay({ host: "127.0.0.1", port: 0, helloDeadlineMs: 80 });
+    const pairRes = await fetch(`${relay.url}/pair`, { method: "POST" });
+    const pair = (await pairRes.json()) as { token: string; wsUrl: string };
+    const bot = await connect(pair.wsUrl);
+    const waiting = onceJson(bot);
+    bot.send(JSON.stringify({ type: "hello", role: "bot", token: pair.token }));
+    expect(await waiting).toEqual({ type: "waiting" });
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(bot.readyState).toBe(WebSocket.OPEN);
   });
 
   it("serves health", async () => {

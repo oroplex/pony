@@ -31,6 +31,12 @@ export interface RelayOptions {
   heartbeatMs?: number;
   /** Per-IP and payload caps. Defaults keep 0.6.4 screenshot frames under the limit. */
   limits?: Partial<RelayLimits>;
+  /**
+   * Close a `/ws` socket that never sends a valid `hello`. Ping/pong only
+   * keeps sockets that already answered; it does not evict a quiet unauthenticated
+   * client. Default 10 seconds.
+   */
+  helloDeadlineMs?: number;
 }
 
 interface ClientMeta {
@@ -50,6 +56,7 @@ export interface StartedRelay {
 
 const CLOSE_BAD = 4003;
 const CLOSE_RATE = 4008;
+const HELLO_DEADLINE_MS = 10_000;
 
 function json(res: http.ServerResponse, status: number, body: unknown): void {
   const data = JSON.stringify(body);
@@ -302,15 +309,14 @@ export function createRelay(options: RelayOptions = {}): Promise<StartedRelay> {
         return;
       }
       joined.replaced?.close(4002, "replaced");
-      if (msg.role === "bot" && msg.client) joined.room.clientName = msg.client;
+      // Do not copy hello.client onto ready. The phone learns the assistant
+      // name from an encrypted intro after the handshake, not from the relay.
       meta.set(socket, { token: msg.token, role: msg.role, peer });
       if (hub.bothPresent(joined.room)) {
-        const name = joined.room.clientName;
         const ready = (role: Role) =>
           JSON.stringify({
             type: "ready",
             role,
-            ...(name ? { client: name } : {}),
             ...(joined.resumed ? { resumed: true } : {}),
           });
         joined.room.bot?.send(ready("bot"));
@@ -372,6 +378,11 @@ export function createRelay(options: RelayOptions = {}): Promise<StartedRelay> {
       socketsByIp.inc(ip);
       alive.set(socket, true);
       const peer = peerOf(socket);
+      const helloMs = options.helloDeadlineMs ?? HELLO_DEADLINE_MS;
+      const helloTimer = setTimeout(() => {
+        if (!meta.has(socket)) rejectSocket(socket, "hello_timeout", CLOSE_BAD);
+      }, helloMs);
+      helloTimer.unref?.();
       socket.on("error", (err) => {
         console.error("[relay] socket", err.message);
       });
@@ -388,6 +399,7 @@ export function createRelay(options: RelayOptions = {}): Promise<StartedRelay> {
 
       socket.on("close", () => {
         try {
+          clearTimeout(helloTimer);
           socketsByIp.dec(ip);
           const who = meta.get(socket);
           if (!who) return;

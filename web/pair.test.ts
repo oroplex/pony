@@ -22,9 +22,11 @@ const payload: PairingPayload = {
   pk: "z_0qekXbJeYuSG-eeLL65tW9xFgQxAHZFosjY6MRlSk",
 };
 
-/** The page only ever sees the query string the shared link produced. */
+/** Pairing fields live in the fragment as of 0.6.5; a leftover `?query` still works. */
 function queryFrom(link: string): string {
-  return new URL(link).search;
+  const url = new URL(link);
+  if (url.hash) return url.hash.replace(/^#/, "?");
+  return url.search;
 }
 
 describe("pair page builder", () => {

@@ -3,9 +3,9 @@ package app.pony.companion.a11y
 enum class TypeMode { INSERT, REPLACE, APPEND }
 
 /**
- * How `type` writes into a focused field. Default is [TypeMode.INSERT]: honor
- * the caret and replace only the current selection. [TypeMode.REPLACE]
- * overwrites the whole field; [TypeMode.APPEND] adds at the end.
+ * How `type` writes into a focused field. Default is [TypeMode.REPLACE]:
+ * overwrite the whole field so the agent cannot append by accident.
+ * [TypeMode.INSERT] honors the caret; [TypeMode.APPEND] adds at the end.
  *
  * When the Pony keyboard is not the active IME, ACTION_SET_TEXT uses
  * [targetValue] so it does not wipe the field. [fieldValue] drops a hint.
@@ -27,8 +27,8 @@ object TextEntry {
 
     fun parseMode(mode: String?, appendFlag: Boolean): TypeMode = when {
         appendFlag || mode.equals("append", ignoreCase = true) -> TypeMode.APPEND
-        mode.equals("replace", ignoreCase = true) -> TypeMode.REPLACE
-        else -> TypeMode.INSERT
+        mode.equals("insert", ignoreCase = true) -> TypeMode.INSERT
+        else -> TypeMode.REPLACE
     }
 
     fun wireName(mode: TypeMode): String = when (mode) {

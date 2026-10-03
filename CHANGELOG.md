@@ -2,6 +2,43 @@
 
 The first list under each version is what the phone shows in **Check for updates**. Keep those lines short and in plain English.
 
+## 0.6.5
+
+- Pairing is a real gate: screen sharing and commands stay off until you tap **It matches** on the phone.
+- A pairing link from another app or a browser always shows the six-digit code first. It never starts capture on its own.
+- Pony asks before send, pay, delete, and call on every tap, press (including keyboard Send), swipe, drag, and long-press — in English and common other languages, including icon-only buttons.
+- The computer side will not act until the phone confirms the code.
+- Saved pairings on the computer (`~/.pony/mcp.json`) are encrypted and readable only by you.
+
+### Details
+
+**It matches is a gate**
+- `beginPairing` starts an inert session (handshake and safety code only). MediaProjection starts after **It matches**.
+- A pairing `VIEW` from a browser or another app always opens the code-confirm screen. `request_mic` and Grok-template extras are ignored on that path.
+- Pairing fields live in the URL fragment (`#v=…`), not the query string.
+
+**SafetyPolicy on every acting verb**
+- `tap`, `press` (including IME send/enter), `swipe`, `drag`, `long_press`, `type`-then-submit, and `open_app` share the same gate. Money screens confirm every acting verb.
+- Locale send/pay/delete words cover es, de, fr, pt, he, hi, ar, zh, ja (and ko as a CJK backstop), plus icon / content-description heuristics.
+- `open_app` of Pony's own package is refused. `type` defaults to replace.
+
+**Protocol v2**
+- Application frames carry a per-direction `seq` inside the AEAD. Duplicates and rewound counters are dropped. Clock-skewed `issuedAt` is rejected, not restamped.
+- The phone sends an encrypted `confirmed` event after **It matches**. MCP acting tools return `not_confirmed` until that arrives.
+- Old phones get `Please update Pony to 0.6.5 or later.` The phone still accepts a v1 pairing payload for the handshake, without replay counters.
+
+**Relay and docs**
+- `/ws` sockets that never send a valid `hello` are closed after about 10 seconds. The relay no longer copies `hello.client` onto `ready`.
+- Recommended Caddy headers (HSTS, nosniff, frame-ancestors, referrer) are in `docs/caddy-security-headers.md`. This tree does not change the live Caddyfile.
+
+**On-phone brain**
+- `remember` and `schedule_task` wait for the owner's yes. Screen text sent to the model is wrapped in `<untrusted-screen>` and labeled untrusted.
+- AgentLoop instructions now say security settings need confirmation, matching the README.
+- `isAccessibilityTool` is false; `PLAY_POLICY.md` matches.
+
+**Release**
+- App and MCP are 0.6.5 (versionCode 12). See [SECURITY.md](SECURITY.md) for private reporting. Do not sign or publish from this tree.
+
 ## 0.6.4
 
 - On payment and checkout screens — Venmo, PayPal, Cash App, Zelle, Google Pay, and major bank apps — Pony now asks before every tap, even a bare icon or a tap by coordinates.

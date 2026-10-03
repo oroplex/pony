@@ -429,9 +429,11 @@ private fun Screen(route: Route, vm: PonyViewModel, actions: PonyActions, scanne
                 error = vm.scanError,
                 pending = vm.pendingLink != null,
                 pairing = session.connection == Connection.Pairing,
-                safetyCode = session.safetyCode?.takeIf { session.connection == Connection.Pairing || session.connection == Connection.Connected },
-                connectedName = if (session.connection == Connection.Connected) grok else null,
+                safetyCode = session.safetyCode?.takeIf { session.connection == Connection.Pairing || session.connection == Connection.Connected || session.connection == Connection.Reconnecting },
+                connectedName = session.clientName ?: grok.takeIf { session.connection == Connection.Connected },
                 grokName = grok,
+                relayHost = session.relay?.let { hostOf(it) },
+                ownerConfirmed = session.ownerConfirmed,
             ),
             onRequestCamera = actions.requestCamera,
             onPair = actions.pair,
@@ -439,6 +441,7 @@ private fun Screen(route: Route, vm: PonyViewModel, actions: PonyActions, scanne
             onTemplate = actions.openTemplate,
             onListenHelp = { nav.push(Route.ListenHelp) },
             onDone = { nav.pop() },
+            onConfirm = actions.confirmPair,
             onBack = { nav.pop() },
             scanner = { scanner(actions.pair) },
         )
@@ -720,4 +723,9 @@ private fun Screen(route: Route, vm: PonyViewModel, actions: PonyActions, scanne
             onBack = { nav.pop() },
         )
     }
+}
+
+private fun hostOf(relay: String): String {
+    val trimmed = relay.trim().removePrefix("wss://").removePrefix("ws://").removePrefix("https://").removePrefix("http://")
+    return trimmed.substringBefore("/").substringBefore("?").ifBlank { relay }
 }

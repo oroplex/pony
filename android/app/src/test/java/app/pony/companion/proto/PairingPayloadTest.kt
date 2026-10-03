@@ -32,9 +32,13 @@ class PairingPayloadTest {
     }
 
     @Test
-    fun rejectsAnUnsupportedVersion() {
+    fun acceptsV1AndV2AndRefusesAFutureVersion() {
+        val v1 = PairingPayload.parse("""{"v":1,"relay":"ws://x","token":"$token","pk":"abc"}""")
+        assertEquals(1, v1.v)
+        val v2 = PairingPayload.parse("""{"v":2,"relay":"ws://x","token":"$token","pk":"abc"}""")
+        assertEquals(2, v2.v)
         assertThrows(IllegalArgumentException::class.java) {
-            PairingPayload.parse("""{"v":2,"relay":"ws://x","token":"$token","pk":"abc"}""")
+            PairingPayload.parse("""{"v":99,"relay":"ws://x","token":"$token","pk":"abc"}""")
         }
     }
 

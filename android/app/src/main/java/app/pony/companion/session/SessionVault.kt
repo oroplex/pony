@@ -27,6 +27,8 @@ data class SessionSnapshot(
     val startedAt: Long,
     val endsAt: Long?,
     val safetyCode: String,
+    val ownerConfirmed: Boolean = false,
+    val protocolVersion: Int = 1,
 ) {
     fun resumable(now: Long): Boolean = endsAt == null || now < endsAt
 
@@ -41,6 +43,8 @@ data class SessionSnapshot(
             add("startedAt" to JsonValue.num(startedAt))
             endsAt?.let { add("endsAt" to JsonValue.num(it)) }
             add("safetyCode" to JsonValue.str(safetyCode))
+            add("ownerConfirmed" to JsonValue.bool(ownerConfirmed))
+            add("protocolVersion" to JsonValue.num(protocolVersion.toDouble()))
         },
     ).encode()
 
@@ -59,6 +63,8 @@ data class SessionSnapshot(
                 startedAt = num("startedAt") ?: 0L,
                 endsAt = num("endsAt"),
                 safetyCode = str("safetyCode").orEmpty(),
+                ownerConfirmed = (obj.get("ownerConfirmed") as? JsonValue.Bool)?.value == true,
+                protocolVersion = num("protocolVersion")?.toInt() ?: 1,
             )
         }
     }

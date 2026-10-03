@@ -283,6 +283,13 @@ class PonyViewModel(app: Application) : AndroidViewModel(app) {
         pendingLink = json
     }
 
+    /** Store the pairing payload and show the code-confirm screen. Does not start capture. */
+    fun holdPairing(json: String) {
+        pendingPayload = json
+        pendingLink = null
+        scanError = null
+    }
+
     fun beginCapture(json: String) {
         pendingPayload = json
         captureInFlight = true

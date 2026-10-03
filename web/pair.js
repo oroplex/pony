@@ -24,8 +24,8 @@ export function readParams(source) {
 
 /**
  * Merge the pairing fields from a location's query string and fragment. The
- * tap link carries them in the fragment, the hand-off page in the query; the
- * fragment wins when a field is in both.
+ * tap link and the hand-off page both put them in the fragment as of 0.6.5;
+ * a leftover `?query` still works. The fragment wins when a field is in both.
  */
 export function readLocationParams(loc) {
   return { ...readParams(loc?.search), ...readParams(loc?.hash) };

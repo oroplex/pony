@@ -100,8 +100,7 @@ program
     const payload = session.qrJson();
     const clientQuery = client?.trim().toLowerCase() === "grok bot" ? "grokbot" : client?.trim() || undefined;
     console.log("Scan this QR with Pony Companion. Pairing expires in 15 minutes.\n");
-    console.log(payload);
-    console.log(`\nOr open this link on the phone: ${pairingLink(JSON.parse(payload), clientQuery)}`);
+    console.log(`Or open this link on the phone: ${pairingLink(JSON.parse(payload), clientQuery)}`);
     console.log(`If this screen is on the phone, open: ${pairPageLink(JSON.parse(payload), clientQuery)}`);
     console.log("");
     qrterminal.generate(payload, { small: true });

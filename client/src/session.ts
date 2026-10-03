@@ -11,7 +11,9 @@ import {
   actionTtlMs,
   b64urlDecode,
   b64urlEncode,
-  decryptJson,
+  DirectionCounter,
+  UPDATE_PONY,
+  decryptJsonFrame,
   deriveSessionKeys,
   encodePairing,
   encryptJson,
@@ -19,6 +21,7 @@ import {
   newMessageId,
   parsePairing,
   relayWsOrigin,
+  usesReplayProtection,
   type SessionKeys,
   formatSafetyCode,
 } from "@pony/shared";
@@ -96,6 +99,7 @@ export interface SavedSession {
   peerKey: string;
   clientName?: string;
   pairedAt: number;
+  ownerConfirmed?: boolean;
 }
 
 interface Pending {
@@ -151,6 +155,8 @@ export class PonySession {
   readonly publicKey: Uint8Array;
   readonly clientName?: string;
   keys?: SessionKeys;
+  ownerConfirmed = false;
+  protocolTooOld = false;
   onRequest?: (msg: AppMessage) => Promise<CommandResult> | CommandResult;
   onEvent?: (msg: AppMessage) => void;
   onProgress?: (event: ProgressEvent) => void;
@@ -172,6 +178,8 @@ export class PonySession {
   private readonly listeners = new Set<(status: LinkStatus) => void>();
   private readonly reconnect: Required<ReconnectOptions> | null;
   private status: LinkStatus = { state: "connecting", attempt: 0, resumed: false };
+  private readonly sendCounter = new DirectionCounter();
+  private readonly recvCounter = new DirectionCounter();
 
   private constructor(
     role: "bot" | "phone",
@@ -252,6 +260,7 @@ export class PonySession {
     session.keys = deriveSessionKeys(privateKey, b64urlDecode(checked.peerKey), checked.payload.token, "bot");
     session.peerKey = checked.peerKey;
     session.pairedAt = checked.pairedAt;
+    session.ownerConfirmed = checked.ownerConfirmed === true;
     session.established = true;
     session.wsUrl = socketPath(opts.socketUrl ?? checked.socketUrl);
     session.dial().catch(() => undefined);
@@ -309,6 +318,7 @@ export class PonySession {
       peerKey: this.peerKey,
       ...(this.clientName ? { clientName: this.clientName } : {}),
       pairedAt: this.pairedAt ?? Date.now(),
+      ownerConfirmed: this.ownerConfirmed,
     };
   }
 
@@ -483,8 +493,15 @@ export class PonySession {
   private sendEncrypted(msg: AppMessage): boolean {
     const ws = this.ws;
     if (!this.keys || !ws || ws.readyState !== WebSocket.OPEN) return false;
-    ws.send(JSON.stringify({ type: "fwd", data: encryptJson(this.keys.send, msg) }));
+    const seq = usesReplayProtection(this.payload.v) ? this.sendCounter.nextSend() : undefined;
+    const body = seq != null ? { ...msg, seq } : msg;
+    ws.send(JSON.stringify({ type: "fwd", data: encryptJson(this.keys.send, body, seq) }));
     return true;
+  }
+
+  confirmOwner(): void {
+    this.ownerConfirmed = true;
+    this.sendEvent("confirmed", { confirmed: true, v: this.payload.v });
   }
 
   private sendRaw(ws: WebSocket, body: unknown): void {
@@ -565,7 +582,7 @@ export class PonySession {
         if (this.role === "phone") {
           this.sendRaw(ws, {
             type: "fwd",
-            data: JSON.stringify({ type: "hs", pk: b64urlEncode(this.publicKey) }),
+            data: JSON.stringify({ type: "hs", pk: b64urlEncode(this.publicKey), v: this.payload.v }),
           });
         }
         if (this.keys) {
@@ -653,8 +670,23 @@ export class PonySession {
 
     let msg: AppMessage;
     try {
-      msg = decryptJson<AppMessage>(this.keys.recv, data);
+      const opened = decryptJsonFrame<AppMessage | { type?: string; client?: string }>(
+        this.keys.recv,
+        data,
+        this.payload.v,
+      );
+      if (usesReplayProtection(this.payload.v) && !this.recvCounter.accept(opened.seq)) return;
+      const value = opened.value;
+      if (value && typeof value === "object" && "type" in value && value.type === "intro") {
+        return;
+      }
+      msg = value as AppMessage;
     } catch {
+      return;
+    }
+    if (msg.kind === "evt" && msg.op === "confirmed") {
+      this.ownerConfirmed = true;
+      this.onEvent?.(msg);
       return;
     }
 
@@ -697,13 +729,18 @@ export class PonySession {
 
   private onPlainFrame(ws: WebSocket, data: string): void {
     if (this.role !== "bot") return;
-    let frame: { type?: string; pk?: string };
+    let frame: { type?: string; pk?: string; v?: number };
     try {
-      frame = JSON.parse(data) as { type?: string; pk?: string };
+      frame = JSON.parse(data) as { type?: string; pk?: string; v?: number };
     } catch {
       return;
     }
     if (frame.type !== "hs" || typeof frame.pk !== "string") return;
+    const phoneVersion = typeof frame.v === "number" ? frame.v : 1;
+    if (phoneVersion < 2) {
+      this.protocolTooOld = true;
+      this.setState(this.status.state, { reason: UPDATE_PONY });
+    }
     if (!this.keys) {
       this.keys = deriveSessionKeys(this.privateKey, b64urlDecode(frame.pk), this.payload.token, "bot");
       this.peerKey = frame.pk;
@@ -712,10 +749,16 @@ export class PonySession {
       this.setState(this.status.state, { reason: "peer_key_changed" });
       return;
     }
-    if (this.clientName) {
-      this.sendRaw(ws, { type: "fwd", data: JSON.stringify({ type: "intro", client: this.clientName }) });
+    if (this.clientName && this.keys) {
+      const seq = usesReplayProtection(this.payload.v) ? this.sendCounter.nextSend() : undefined;
+      ws.send(
+        JSON.stringify({
+          type: "fwd",
+          data: encryptJson(this.keys.send, { type: "intro", client: this.clientName }, seq),
+        }),
+      );
     }
-    this.setState("ready", { reason: undefined });
+    this.setState("ready", { reason: this.protocolTooOld ? UPDATE_PONY : undefined });
   }
 
   private onPhoneProgress(event: ProgressEvent): void {

@@ -86,6 +86,10 @@ class PonySessionService : Service(), RelayClient.Listener {
     private val handoff = StandingHandoff()
     private var network: ConnectivityManager.NetworkCallback? = null
     @Volatile private var lastNetwork: Network? = null
+    @Volatile private var ownerConfirmed = false
+    @Volatile private var protocolVersion = 1
+    private val sendCounter = DirectionCounter()
+    private val recvCounter = DirectionCounter()
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -105,6 +109,19 @@ class PonySessionService : Service(), RelayClient.Listener {
             }
             ACTION_RETRY -> {
                 worker.execute { reconnectNow() }
+                return START_STICKY
+            }
+            ACTION_CONFIRM -> {
+                worker.execute { confirmOwner() }
+                return START_STICKY
+            }
+            ACTION_ATTACH -> {
+                try {
+                    attachProjection(intent)
+                    startInForeground(true, connectedStatus(snapshot?.clientName))
+                } catch (e: Exception) {
+                    fail("Could not start screen sharing: ${e.message}")
+                }
                 return START_STICKY
             }
             ACTION_START -> {
@@ -152,7 +169,11 @@ class PonySessionService : Service(), RelayClient.Listener {
             startedAt = now,
             endsAt = length.millis?.let { now + it },
             safetyCode = SessionCrypto.formatSafety(derived.safetyCode),
+            ownerConfirmed = false,
+            protocolVersion = pairing.v,
         )
+        ownerConfirmed = false
+        protocolVersion = pairing.v
         phone = pair
         keys = derived
         snapshot = next
@@ -172,6 +193,7 @@ class PonySessionService : Service(), RelayClient.Listener {
                 clientName = null,
                 peerAway = false,
                 lastError = null,
+                ownerConfirmed = false,
                 resumable = true,
                 endedReason = null,
                 reconnectAttempt = 0,
@@ -195,6 +217,8 @@ class PonySessionService : Service(), RelayClient.Listener {
         phone = pair
         keys = SessionCrypto.derive(pair.privateKey, SessionCrypto.b64urlDecode(saved.botPk), saved.token, "phone")
         snapshot = saved
+        ownerConfirmed = saved.ownerConfirmed
+        protocolVersion = saved.protocolVersion
         SessionRepository.update {
             it.copy(
                 connection = Connection.Reconnecting,
@@ -206,6 +230,7 @@ class PonySessionService : Service(), RelayClient.Listener {
                 clientName = saved.clientName,
                 resumable = true,
                 endedReason = null,
+                ownerConfirmed = saved.ownerConfirmed,
             )
         }
         connect()
@@ -321,6 +346,7 @@ class PonySessionService : Service(), RelayClient.Listener {
         }
         updateNotification(connectedStatus(name))
         if (resumed) append("session", "reconnected", true)
+        if (ownerConfirmed) sendEvent("confirmed", JSONObject().put("confirmed", true).put("v", protocolVersion))
     }
 
     override fun onClientName(name: String) {
@@ -334,7 +360,16 @@ class PonySessionService : Service(), RelayClient.Listener {
     }
 
     override fun onPlainHandshakeNeeded() {
-        phone?.let { relay?.sendHandshake(it.publicKey) }
+        phone?.let { relay?.sendHandshake(it.publicKey, protocolVersion) }
+    }
+
+    private fun confirmOwner() {
+        if (ended.get()) return
+        ownerConfirmed = true
+        snapshot = snapshot?.copy(ownerConfirmed = true)?.also { vault.save(it) }
+        SessionRepository.update { it.copy(ownerConfirmed = true) }
+        sendEvent("confirmed", JSONObject().put("confirmed", true).put("v", protocolVersion))
+        append("session", "owner confirmed the safety code", true)
     }
 
     override fun onPeerAway() {
@@ -348,13 +383,31 @@ class PonySessionService : Service(), RelayClient.Listener {
     override fun onFrame(data: String) {
         val sessionKeys = keys ?: return
         if (data.startsWith("{")) {
-            val intro = runCatching { JSONObject(data) }.getOrNull() ?: return
-            if (intro.optString("type") == "intro") onClientName(intro.optString("client"))
+            // Plaintext intro / handshake from the relay is unauthenticated. Ignore it.
+            return
+        }
+        val decoded = try {
+            SessionCrypto.decryptFrame(sessionKeys.recv, SessionCrypto.b64urlDecode(data), protocolVersion)
+        } catch (e: Exception) {
+            append("decrypt", e.message ?: "bad frame", false)
+            return
+        }
+        if (protocolVersion >= 2 && !recvCounter.accept(decoded.seq)) {
+            append("decrypt", "replayed", false)
+            return
+        }
+        val obj = try {
+            JSONObject(String(decoded.plaintext))
+        } catch (e: Exception) {
+            append("decrypt", e.message ?: "bad frame", false)
+            return
+        }
+        if (obj.optString("type") == "intro") {
+            onClientName(obj.optString("client"))
             return
         }
         val plain = try {
-            val bytes = SessionCrypto.decrypt(sessionKeys.recv, SessionCrypto.b64urlDecode(data))
-            AppMessage.fromJson(JSONObject(String(bytes)))
+            AppMessage.fromJson(obj)
         } catch (e: Exception) {
             append("decrypt", e.message ?: "bad frame", false)
             return
@@ -372,10 +425,17 @@ class PonySessionService : Service(), RelayClient.Listener {
         val lane = if (plain.op == "wait_for_request") waits else commands
         lane.execute {
             val ticket = ActionGate.ticket(plain.id, plain.op, plain.params, receivedAt)
-            val result = if (ActionGate.abandoned(ticket)) {
+            val result = if (ticket.clockSkew) {
+                append(plain.op ?: "action", "clock_skew", false)
+                Cmd(false, ActionExpiry.CLOCK_SKEW, JSONObject().put("reason", ActionExpiry.CLOCK_SKEW))
+            } else if (ActionGate.alreadyRan(plain.id)) {
+                append(plain.op ?: "action", "replayed", false)
+                Cmd(false, ActionExpiry.REPLAYED, JSONObject().put("reason", ActionExpiry.REPLAYED).put("id", plain.id))
+            } else if (ActionGate.abandoned(ticket)) {
                 expiredCmd(ticket)
             } else {
                 try {
+                    ActionGate.claim(plain.id)
                     handle(plain, ticket)
                 } finally {
                     ActionGate.forget(plain.id)
@@ -396,6 +456,30 @@ class PonySessionService : Service(), RelayClient.Listener {
         )
     }
 
+    private fun confirmIfNeeded(
+        op: String,
+        target: app.pony.companion.voice.TapTarget,
+        ticket: ActionTicket,
+        watch: Watch,
+        key: String? = null,
+    ): Cmd? {
+        val verdict = SafetyPolicy.forAction(op, target, key)
+        if (verdict is Verdict.Block) {
+            append(op, verdict.reason, false)
+            return Cmd(false, verdict.reason)
+        }
+        if (verdict !is Verdict.Confirm) return null
+        watch.deferred(AWAITING_OWNER, 0)
+        val answer = VoiceController.confirmOutcome(this, verdict.prompt, cancelled = { watch.cancelled() })
+        if (answer.expired) return expiredCmd(ticket)
+        if (!answer.accepted) {
+            append(op, "not confirmed", false)
+            VoiceController.onRemoteStep(this, StepKind.Confirm, "You declined: ${verdict.prompt}", false)
+            return Cmd(false, "not_confirmed", JSONObject().put("reason", verdict.reason))
+        }
+        return null
+    }
+
     private fun handle(msg: AppMessage): Cmd = handle(msg, ActionGate.ticket(msg.id, msg.op, msg.params))
 
     private fun handle(msg: AppMessage, ticket: ActionTicket): Cmd {
@@ -406,6 +490,9 @@ class PonySessionService : Service(), RelayClient.Listener {
         val params = msg.params ?: JSONObject()
         val op = msg.op
         val screenOp = op in SCREEN_OPS
+        if (op in GATED_OPS && !ownerConfirmed) {
+            return Cmd(false, "not_confirmed", JSONObject().put("reason", "safety_code"))
+        }
         if (screenOp && StopState.gate.isStopped()) return Cmd(false, "stopped")
         if (screenOp && LockState.isLocked(this)) {
             VoiceController.promptUnlock(this)
@@ -462,17 +549,7 @@ class PonySessionService : Service(), RelayClient.Listener {
                     val x = params.getDouble("x")
                     val y = params.getDouble("y")
                     val target = ScreenRouter.tapTarget(this, x, y, params)
-                    val verdict = SafetyPolicy.forTap(target)
-                    if (verdict is Verdict.Confirm) watch.deferred(AWAITING_OWNER, 0)
-                    if (verdict is Verdict.Confirm) {
-                        val answer = VoiceController.confirmOutcome(this, verdict.prompt, cancelled = { watch.cancelled() })
-                        if (answer.expired) return expiredCmd(ticket)
-                        if (!answer.accepted) {
-                            append("tap", "not confirmed", false)
-                            VoiceController.onRemoteStep(this, StepKind.Confirm, "You declined: ${verdict.prompt}", false)
-                            return Cmd(false, "not_confirmed", JSONObject().put("reason", verdict.reason))
-                        }
-                    }
+                    confirmIfNeeded("tap", target, ticket, watch)?.let { return it }
                     val acted = ScreenRouter.tap(this, x, y, params, watch)
                     append("tap", "${acted.fields["x"]},${acted.fields["y"]} ${acted.error ?: ""}".trim(), acted.ok)
                     val label = if (target.isPassword) "the password field" else target.label.take(60)
@@ -486,6 +563,8 @@ class PonySessionService : Service(), RelayClient.Listener {
                     cmdOf(acted)
                 }
                 "swipe" -> {
+                    val target = ScreenRouter.tapTarget(this, params.getDouble("x1"), params.getDouble("y1"), params)
+                    confirmIfNeeded("swipe", target, ticket, watch)?.let { return it }
                     val acted = ScreenRouter.swipe(
                         this,
                         params.getDouble("x1"),
@@ -505,6 +584,7 @@ class PonySessionService : Service(), RelayClient.Listener {
                     val x = params.getDouble("x")
                     val y = params.getDouble("y")
                     val target = ScreenRouter.tapTarget(this, x, y, params)
+                    confirmIfNeeded("long_press", target, ticket, watch)?.let { return it }
                     val acted = ScreenRouter.longPress(this, x, y, params.optLong("durationMs", 600), params, watch)
                     append("long_press", "${acted.fields["x"]},${acted.fields["y"]} ${acted.error ?: ""}".trim(), acted.ok)
                     val label = if (target.isPassword) "" else target.label.take(60)
@@ -518,6 +598,8 @@ class PonySessionService : Service(), RelayClient.Listener {
                     cmdOf(acted)
                 }
                 "drag" -> {
+                    val target = ScreenRouter.tapTarget(this, params.getDouble("x1"), params.getDouble("y1"), params)
+                    confirmIfNeeded("drag", target, ticket, watch)?.let { return it }
                     val acted = ScreenRouter.drag(
                         this,
                         params.getDouble("x1"),
@@ -536,6 +618,8 @@ class PonySessionService : Service(), RelayClient.Listener {
                 "pinch" -> {
                     val from = params.getDouble("fromDistance")
                     val to = params.getDouble("toDistance")
+                    val target = ScreenRouter.tapTarget(this, params.getDouble("x"), params.getDouble("y"), params)
+                    confirmIfNeeded("pinch", target, ticket, watch)?.let { return it }
                     val acted = ScreenRouter.pinch(
                         this,
                         params.getDouble("x"),
@@ -554,9 +638,19 @@ class PonySessionService : Service(), RelayClient.Listener {
                 }
                 "type" -> {
                     val text = params.optString("text")
-                    val append = params.optString("mode").equals("append", ignoreCase = true) || params.optBoolean("append", false)
+                    val mode = app.pony.companion.a11y.TextEntry.parseMode(
+                        params.optString("mode").ifBlank { null },
+                        params.optBoolean("append", false),
+                    )
+                    val target = ScreenRouter.tapTarget(this, 0.0, 0.0, params).let {
+                        if (it.packageName.isNullOrBlank()) {
+                            val pkg = PonyAccessibilityService.instance?.foregroundPackage()
+                            it.copy(packageName = pkg, appLabel = pkg?.let { name -> BackgroundHost.appLabel(this, name) })
+                        } else it
+                    }
+                    confirmIfNeeded("type", target, ticket, watch)?.let { return it }
                     if (ActionGate.abandoned(ticket)) return expiredCmd(ticket)
-                    val acted = ScreenRouter.type(this, text, append, params, watch)
+                    val acted = ScreenRouter.type(this, text, mode, params, watch)
                     if (acted.ok) {
                         append("type", "${acted.fields["length"]} chars via ${acted.fields["method"]}", true)
                     } else {
@@ -568,6 +662,13 @@ class PonySessionService : Service(), RelayClient.Listener {
                 }
                 "press" -> {
                     val key = params.optString("key")
+                    val target = ScreenRouter.tapTarget(this, 0.0, 0.0, params).let {
+                        if (it.packageName.isNullOrBlank()) {
+                            val pkg = PonyAccessibilityService.instance?.foregroundPackage()
+                            it.copy(packageName = pkg, appLabel = pkg?.let { name -> BackgroundHost.appLabel(this, name) })
+                        } else it
+                    }
+                    confirmIfNeeded("press", target, ticket, watch, key)?.let { return it }
                     val acted = ScreenRouter.press(this, key, params, watch)
                     append("press", key, acted.ok)
                     VoiceController.onRemoteStep(this, StepKind.Key, stepLabel("Pressed ${key.replaceFirstChar { it.uppercase() }}", acted), acted.ok)
@@ -577,16 +678,7 @@ class PonySessionService : Service(), RelayClient.Listener {
                 "open_app" -> {
                     val pkg = params.optString("packageName")
                     val label = BackgroundHost.appLabel(this, pkg)
-                    val verdict = SafetyPolicy.forOpenApp(pkg, label)
-                    if (verdict is Verdict.Confirm) watch.deferred(AWAITING_OWNER, 0)
-                    if (verdict is Verdict.Confirm) {
-                        val answer = VoiceController.confirmOutcome(this, verdict.prompt, cancelled = { watch.cancelled() })
-                        if (answer.expired) return expiredCmd(ticket)
-                        if (!answer.accepted) {
-                            append("open_app", "not confirmed", false)
-                            return Cmd(false, "not_confirmed")
-                        }
-                    }
+                    confirmIfNeeded("open_app", app.pony.companion.voice.TapTarget(label, packageName = pkg, appLabel = label), ticket, watch)?.let { return it }
                     val consent = { prompt: String ->
                         watch.deferred(AWAITING_OWNER, 0)
                         val answer = VoiceController.confirmOutcome(this, prompt, cancelled = { watch.cancelled() })
@@ -823,7 +915,8 @@ class PonySessionService : Service(), RelayClient.Listener {
 
     private fun send(message: AppMessage): Boolean {
         val sessionKeys = keys ?: return false
-        return runCatching { relay?.sendMessage(sessionKeys.send, message) == true }.getOrDefault(false)
+        val seq = if (protocolVersion >= 2) sendCounter.nextSend() else null
+        return runCatching { relay?.sendMessage(sessionKeys.send, message, seq) == true }.getOrDefault(false)
     }
 
     private fun sendEvent(op: String, result: JSONObject) {
@@ -883,6 +976,8 @@ class PonySessionService : Service(), RelayClient.Listener {
         keys = null
         phone = null
         snapshot = null
+        ownerConfirmed = false
+        protocolVersion = 1
         vault.clear()
         handoff.finished(null)
         VoiceBus.inbox.forgetListener()
@@ -901,6 +996,7 @@ class PonySessionService : Service(), RelayClient.Listener {
                 reconnectAttempt = 0,
                 nextRetryAt = null,
                 endedReason = status,
+                ownerConfirmed = false,
             )
         }
         BackgroundHost.release(this)
@@ -1004,6 +1100,8 @@ class PonySessionService : Service(), RelayClient.Listener {
         const val ACTION_STOP = "app.pony.companion.STOP"
         const val ACTION_RESUME = "app.pony.companion.RESUME"
         const val ACTION_RETRY = "app.pony.companion.RETRY"
+        const val ACTION_CONFIRM = "app.pony.companion.CONFIRM"
+        const val ACTION_ATTACH = "app.pony.companion.ATTACH"
         const val EXTRA_PAIRING = "pairing"
         const val EXTRA_PROJECTION_CODE = "projection_code"
         const val EXTRA_PROJECTION_DATA = "projection_data"
@@ -1011,6 +1109,7 @@ class PonySessionService : Service(), RelayClient.Listener {
         private const val NOTIF_ID = 17
         private val SCREEN_OPS = setOf("tap", "swipe", "long_press", "drag", "pinch", "type", "press", "open_app", "open_settings", "screenshot", "ui_tree", "wait_idle")
         private val ACTING_OPS = setOf("tap", "swipe", "long_press", "drag", "pinch", "type", "press", "open_app", "open_settings")
+        private val GATED_OPS = SCREEN_OPS + ACTING_OPS + setOf("speak", "ask_user", "confirm")
 
         /** Progress reason while a command waits for the owner to answer a question on the phone. */
         const val AWAITING_OWNER = "awaiting_owner"
@@ -1021,6 +1120,22 @@ class PonySessionService : Service(), RelayClient.Listener {
 
         fun vaultFor(context: Context): SessionVault =
             SessionVault(File(context.filesDir, "session.json"), KeystoreSecretBox(KeystoreSecretBox.SESSION_ALIAS))
+
+        fun startInert(context: Context, pairingJson: String) {
+            start(context, pairingJson, 0, null)
+        }
+
+        fun confirmOwner(context: Context) {
+            context.startService(Intent(context, PonySessionService::class.java).setAction(ACTION_CONFIRM))
+        }
+
+        fun attachProjection(context: Context, projectionCode: Int, projectionData: Intent?) {
+            val intent = Intent(context, PonySessionService::class.java)
+                .setAction(ACTION_ATTACH)
+                .putExtra(EXTRA_PROJECTION_CODE, projectionCode)
+            if (projectionData != null) intent.putExtra(EXTRA_PROJECTION_DATA, projectionData)
+            context.startForegroundService(intent)
+        }
 
         fun start(context: Context, pairingJson: String, projectionCode: Int, projectionData: Intent?) {
             val intent = Intent(context, PonySessionService::class.java)

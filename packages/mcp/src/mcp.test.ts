@@ -55,6 +55,13 @@ async function connectPhone(payload: string, phone = new MockPhone(), socketUrl?
   return phone;
 }
 
+async function confirmPhone(): Promise<void> {
+  const phone = sessions.at(-1);
+  if (!phone) throw new Error("no phone session");
+  phone.confirmOwner();
+  await until(() => mcp!.controller.status().ownerConfirmed, "owner confirmed");
+}
+
 const FAST = { initialMs: 40, maxMs: 200 };
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -140,8 +147,9 @@ describe("pony mcp", () => {
     expect(summary.safetyCode).toBeNull();
     expect(summary.pairingLink.startsWith("pony://pair?")).toBe(true);
     expect(parsePairingInput(summary.pairingLink).token).toBe(summary.token);
-    expect(summary.pairPageLink).toContain("/pair.html?");
-    expect(new URL(summary.pairPageLink).searchParams.get("token")).toBe(summary.token);
+    expect(summary.pairPageLink).toContain("/pair.html#");
+    expect(new URL(summary.pairPageLink).searchParams.get("token")).toBeNull();
+    expect(new URLSearchParams(new URL(summary.pairPageLink).hash.replace(/^#/, "")).get("token")).toBe(summary.token);
     expect(Object.keys(JSON.parse(summary.payload)).sort()).toEqual(["pk", "relay", "token", "v"]);
     expect(summary.payload).not.toContain("private");
 
@@ -159,6 +167,14 @@ describe("pony mcp", () => {
     const status = await waitConnected(caller);
     expect(status.safetyCode).toMatch(/^\d{3}-\d{3}$/);
     expect(status.safetyCode).toBe(sessions[0].safetyCode());
+    expect(status.ownerConfirmed).toBe(false);
+
+    const blocked = await caller.callTool({ name: "screenshot", arguments: {} });
+    expect(blocked.isError).toBe(true);
+    expect(textOf(blocked)).toContain("not_confirmed");
+
+    sessions[0].confirmOwner();
+    await until(() => mcp!.controller.status().ownerConfirmed, "owner confirmed");
 
     const shot = await caller.callTool({ name: "screenshot", arguments: {} });
     expect(shot.isError).toBeFalsy();
@@ -219,9 +235,9 @@ describe("pony mcp", () => {
     expect(phone.lastTyped).toBe("replaced-more");
 
     phone.focusedIsPassword = true;
-    const blocked = await caller.callTool({ name: "type", arguments: { text: secret } });
-    expect(blocked.isError).toBe(true);
-    expect(textOf(blocked)).toContain("password_field");
+    const passwordBlocked = await caller.callTool({ name: "type", arguments: { text: secret } });
+    expect(passwordBlocked.isError).toBe(true);
+    expect(textOf(passwordBlocked)).toContain("password_field");
 
     const tree = await caller.callTool({ name: "ui_tree", arguments: {} });
     expect(textOf(tree)).toContain("TextView");
@@ -275,6 +291,33 @@ describe("pony mcp", () => {
     expect(after.connected).toBe(false);
   });
 
+  it("refuses every acting verb until the owner confirms the code", async () => {
+    const caller = await startMcp();
+    const paired = JSON.parse(textOf(await caller.callTool({ name: "pair", arguments: {} }))) as { payload: string };
+    await connectPhone(paired.payload);
+    await waitConnected(caller);
+    expect((await statusOf(caller)).ownerConfirmed).toBe(false);
+    const acting = [
+      { name: "screenshot", arguments: {} },
+      { name: "ui_tree", arguments: {} },
+      { name: "tap", arguments: { x: 1, y: 1 } },
+      { name: "swipe", arguments: { x1: 1, y1: 2, x2: 3, y2: 4 } },
+      { name: "long_press", arguments: { x: 1, y: 1 } },
+      { name: "drag", arguments: { x1: 1, y1: 2, x2: 3, y2: 4 } },
+      { name: "type", arguments: { text: "hi" } },
+      { name: "key", arguments: { key: "enter" } },
+      { name: "open_app", arguments: { packageName: "com.android.settings" } },
+    ];
+    for (const tool of acting) {
+      const result = await caller.callTool(tool);
+      expect(result.isError, tool.name).toBe(true);
+      expect(textOf(result), tool.name).toContain("not_confirmed");
+    }
+    await confirmPhone();
+    const tap = await caller.callTool({ name: "tap", arguments: { x: 2, y: 3 } });
+    expect(tap.isError).toBeFalsy();
+  });
+
   it("routes voice tools without logging the spoken text", async () => {
     const caller = await startMcp();
     const paired = JSON.parse(textOf(await caller.callTool({ name: "pair", arguments: {} }))) as {
@@ -282,6 +325,7 @@ describe("pony mcp", () => {
     };
     await connectPhone(paired.payload);
     await waitConnected(caller);
+    await confirmPhone();
 
     const secret = "sk-live-SHOULD-NOT-LOG";
     const spoken = await caller.callTool({ name: "speak", arguments: { text: secret } });
@@ -349,6 +393,7 @@ describe("pony mcp", () => {
     expect(Object.keys(JSON.parse(paired.payload)).sort()).toEqual(["pk", "relay", "token", "v"]);
     await connectPhone(paired.payload);
     await waitConnected(caller);
+    await confirmPhone();
 
     const tap = JSON.parse(textOf(await caller.callTool({ name: "tap", arguments: { x: 8, y: 9 } })));
     expect(tap.result).toMatchObject({ x: 8, y: 9, display: "background" });
@@ -398,6 +443,7 @@ describe("pony mcp", () => {
     expect(summary.payload).not.toContain("private");
     await connectPhone(summary.payload, new MockPhone(), relay.url);
     await waitConnected(caller);
+    await confirmPhone();
 
     const tap = JSON.parse(textOf(await caller.callTool({ name: "tap", arguments: { x: 3, y: 4 } })));
     expect(tap.result).toMatchObject({ display: "background", x: 3, y: 4 });
@@ -447,6 +493,7 @@ describe("pony mcp", () => {
     phone.sessionEndsAt = null;
     await connectPhone(paired.payload, phone);
     await waitConnected(caller);
+    await confirmPhone();
     await until(() => phone.calls.some((call) => call.op === "info"), "the info request");
     await sleep(50);
     now += 45 * 60 * 1000;

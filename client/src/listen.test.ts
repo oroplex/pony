@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -177,6 +177,34 @@ describe("SessionFile", () => {
     expect(file.load()).toBeNull();
     file.clear();
     expect(file.load()).toBeNull();
+  });
+
+  it("encrypts the pairing file and still reads leftover plaintext", () => {
+    const saved = {
+      v: 1 as const,
+      role: "bot" as const,
+      payload: { v: 2, relay: "wss://relay.example", token: "ab".repeat(32), pk: "pk" },
+      socketUrl: "wss://relay.example/ws",
+      privateKey: "sk-secret",
+      publicKey: "pk",
+      peerKey: "phone",
+      pairedAt: 1,
+      ownerConfirmed: true,
+    };
+    const encrypted = new SessionFile(join(dir, "mcp.json"));
+    encrypted.save(saved);
+    const raw = readFileSync(encrypted.path, "utf8");
+    expect(raw.startsWith("pony-mcp1.")).toBe(true);
+    expect(raw).not.toContain("sk-secret");
+    expect(encrypted.load()?.privateKey).toBe("sk-secret");
+    expect(encrypted.load()?.ownerConfirmed).toBe(true);
+    if (process.platform !== "win32") {
+      expect(statSync(encrypted.path).mode & 0o777).toBe(0o600);
+      expect(statSync(`${encrypted.path}.key`).mode & 0o777).toBe(0o600);
+    }
+    const leftover = join(dir, "legacy.json");
+    writeFileSync(leftover, JSON.stringify(saved), { mode: 0o600 });
+    expect(new SessionFile(leftover).load()?.privateKey).toBe("sk-secret");
   });
 });
 
