@@ -30,6 +30,7 @@ import app.pony.companion.recap.UndoLog
 import app.pony.companion.recap.UndoableAction
 import app.pony.companion.routines.RoutineBook
 import app.pony.companion.routines.Routines
+import app.pony.companion.session.ActionExpiry
 import app.pony.companion.session.AuditEntry
 import app.pony.companion.session.AuditLog
 import app.pony.companion.session.Connection
@@ -59,6 +60,10 @@ import kotlinx.coroutines.flow.update
 
 data class Prompt(val id: Int, val text: String, val confirm: Boolean)
 
+data class PromptAnswer(val accepted: Boolean, val expired: Boolean = false, val stopped: Boolean = false)
+
+data class AskAnswer(val text: String, val expired: Boolean = false, val stopped: Boolean = false)
+
 enum class NoticeAction { ALLOW_MIC, OPEN_PONY, RETRY }
 
 data class Notice(val id: Int, val title: String, val body: String, val action: NoticeAction? = null)
@@ -87,6 +92,7 @@ object VoiceController {
     private val listening = AtomicBoolean(false)
     private val choiceMade = AtomicBoolean(false)
     private val choiceYes = AtomicBoolean(false)
+    private val promptCancel = AtomicBoolean(false)
     private val serial = AtomicInteger()
     @Volatile private var appContext: Context? = null
     @Volatile private var lastSpoken: String? = null
@@ -340,11 +346,28 @@ object VoiceController {
         return SpeechOutput.speak(context, say, VoicePrefs.speechRate(context), VoicePrefs.voiceName(context))
     }
 
-    fun askBlocking(context: Context, question: String): String {
-        if (Looper.myLooper() == Looper.getMainLooper()) return ""
+    /** Drops the on-phone prompt when the connector gives up, so it cannot later log a stale "declined". */
+    fun cancelPrompt() {
+        promptCancel.set(true)
+        choiceMade.set(true)
+        choiceYes.set(false)
+        _voice.update { it.copy(prompt = null, transcript = "", level = 0f) }
+    }
+
+    fun askBlocking(context: Context, question: String): String = askOutcome(context, question).text
+
+    fun askOutcome(
+        context: Context,
+        question: String,
+        cancelled: () -> Boolean = { false },
+        limitMs: Long = ActionExpiry.OWNER_PROMPT_MS,
+    ): AskAnswer {
+        if (Looper.myLooper() == Looper.getMainLooper()) return AskAnswer("")
         val app = context.applicationContext
         val id = serial.incrementAndGet()
         choiceMade.set(false)
+        promptCancel.set(false)
+        val deadline = System.currentTimeMillis() + limitMs.coerceAtLeast(1_000L)
         _voice.update { it.copy(prompt = Prompt(id, question, confirm = false)) }
         showOverlay(app)
         TaskRuntime.step(StepKind.Ask, "Asked you: ${question.take(120)}")
@@ -354,26 +377,56 @@ object VoiceController {
                 app,
                 onPartial = { words -> _voice.update { it.copy(transcript = words) } },
                 onLevel = { level -> _voice.update { it.copy(level = level) } },
-            ) { choiceMade.get() || StopState.gate.isStopped() }.getOrNull().orEmpty()
+            ) {
+                choiceMade.get() || StopState.gate.isStopped() || promptCancel.get() || cancelled() ||
+                    System.currentTimeMillis() >= deadline
+            }.getOrNull().orEmpty()
         } else {
             ""
         }
+        while (heard.isBlank() && !choiceMade.get() && !StopState.gate.isStopped() &&
+            !promptCancel.get() && !cancelled() && System.currentTimeMillis() < deadline
+        ) {
+            Thread.sleep(80)
+        }
         _voice.update { if (it.prompt?.id == id) it.copy(prompt = null, transcript = "", level = 0f) else it }
         lastRemoteAt = System.currentTimeMillis()
+        val expired = promptCancel.get() || cancelled() || (heard.isBlank() && System.currentTimeMillis() >= deadline && !choiceMade.get())
         if (VoiceWords.isStop(heard)) {
             stop()
-            return ""
+            return AskAnswer("", stopped = true)
+        }
+        if (expired) {
+            log(app, "ask_user", "expired", false)
+            return AskAnswer("", expired = true)
         }
         log(app, "ask_user", "${question.length} chars", true)
-        return heard
+        return AskAnswer(heard, stopped = StopState.gate.isStopped())
     }
 
-    fun confirmBlocking(context: Context, prompt: String): Boolean {
-        if (Looper.myLooper() == Looper.getMainLooper()) return false
+    fun confirmBlocking(
+        context: Context,
+        prompt: String,
+        cancelled: () -> Boolean = { false },
+        limitMs: Long = ActionExpiry.OWNER_PROMPT_MS,
+    ): Boolean {
+        val outcome = confirmOutcome(context, prompt, cancelled, limitMs)
+        return outcome.accepted && !outcome.expired && !outcome.stopped
+    }
+
+    fun confirmOutcome(
+        context: Context,
+        prompt: String,
+        cancelled: () -> Boolean = { false },
+        limitMs: Long = ActionExpiry.OWNER_PROMPT_MS,
+    ): PromptAnswer {
+        if (Looper.myLooper() == Looper.getMainLooper()) return PromptAnswer(false)
         val app = context.applicationContext
         val id = serial.incrementAndGet()
         choiceMade.set(false)
         choiceYes.set(false)
+        promptCancel.set(false)
+        val deadline = System.currentTimeMillis() + limitMs.coerceAtLeast(1_000L)
         _voice.update { it.copy(prompt = Prompt(id, prompt, confirm = true)) }
         showOverlay(app)
         TaskRuntime.tracker.headline("Waiting for your answer: $prompt")
@@ -384,25 +437,39 @@ object VoiceController {
                 app,
                 onPartial = { words -> _voice.update { it.copy(transcript = words) } },
                 onLevel = { level -> _voice.update { it.copy(level = level) } },
-            ) { choiceMade.get() || StopState.gate.isStopped() }.getOrNull().orEmpty()
+            ) {
+                choiceMade.get() || StopState.gate.isStopped() || promptCancel.get() || cancelled() ||
+                    System.currentTimeMillis() >= deadline
+            }.getOrNull().orEmpty()
         }
-        val deadline = System.currentTimeMillis() + 60_000
         while (!choiceMade.get() && !VoiceWords.isYes(heard) && !VoiceWords.isNo(heard) &&
-            !StopState.gate.isStopped() && System.currentTimeMillis() < deadline
+            !StopState.gate.isStopped() && !promptCancel.get() && !cancelled() &&
+            System.currentTimeMillis() < deadline
         ) {
             Thread.sleep(80)
         }
+        val expired = promptCancel.get() || cancelled() ||
+            (!choiceMade.get() && !VoiceWords.isYes(heard) && !VoiceWords.isNo(heard) &&
+                !StopState.gate.isStopped() && System.currentTimeMillis() >= deadline)
+        val stopped = StopState.gate.isStopped() || VoiceWords.isStop(heard)
         val accepted = when {
-            StopState.gate.isStopped() || VoiceWords.isStop(heard) -> false
+            expired || stopped -> false
             choiceMade.get() -> choiceYes.get()
             else -> VoiceWords.isYes(heard)
         }
         _voice.update { if (it.prompt?.id == id) it.copy(prompt = null, transcript = "", level = 0f) else it }
         lastRemoteAt = System.currentTimeMillis()
-        log(app, "confirm", "${prompt.take(80)} → ${if (accepted) "yes" else "no"}", accepted)
-        TaskRuntime.step(StepKind.Confirm, if (accepted) "You said yes: $prompt" else "You said no: $prompt", ok = accepted)
+        val label = when {
+            expired -> "expired"
+            accepted -> "yes"
+            else -> "no"
+        }
+        log(app, "confirm", "${prompt.take(80)} → $label", accepted)
+        if (!expired) {
+            TaskRuntime.step(StepKind.Confirm, if (accepted) "You said yes: $prompt" else "You said no: $prompt", ok = accepted)
+        }
         if (VoiceWords.isStop(heard)) stop()
-        return accepted && !StopState.gate.isStopped()
+        return PromptAnswer(accepted = accepted, expired = expired, stopped = stopped)
     }
 
     fun promptUnlock(context: Context) {

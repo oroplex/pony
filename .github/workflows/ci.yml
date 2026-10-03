@@ -35,10 +35,19 @@ jobs:
       - name: Assemble debug APK and run unit and screenshot tests
         working-directory: android
         run: ./gradlew :app:assembleDebug :app:testDebugUnitTest --stacktrace
+      - name: Assemble unsigned release APK
+        working-directory: android
+        run: ./gradlew :app:assembleRelease --stacktrace
       - uses: actions/upload-artifact@v4
         with:
           name: pony-companion-debug
           path: android/app/build/outputs/apk/debug/*.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pony-companion-release-unsigned
+          path: |
+            android/app/build/outputs/apk/release/app-release-unsigned.apk
+            android/app/build/outputs/apk/release/*.apk
       - uses: actions/upload-artifact@v4
         with:
           name: pony-companion-screenshots

@@ -1,7 +1,14 @@
 import QRCode from "qrcode";
 
 import type { CommandOp, CommandParams, PressKey } from "@pony/shared";
-import { PAIRING_TTL_MS, REQUEST_POLL_MS, SESSION_TTL_MS, pairPageLink, pairingLink } from "@pony/shared";
+import {
+  OWNER_CLIENT_WAIT_MS,
+  PAIRING_TTL_MS,
+  REQUEST_POLL_MS,
+  SESSION_TTL_MS,
+  pairPageLink,
+  pairingLink,
+} from "@pony/shared";
 import {
   ENDED_REASONS,
   PonySession,
@@ -45,6 +52,18 @@ export interface PhoneStatus {
   queued: number;
   lastError: string | null;
   log: ActionLogEntry[];
+  /** Active IME id and whether the Pony keyboard can commit text. Null until the phone answers `info`. */
+  ime: ImeStatusInfo | null;
+  imeCurrent: string | null;
+  ponyKeyboardUsable: boolean | null;
+}
+
+export interface ImeStatusInfo {
+  current: string | null;
+  ponyEnabled: boolean;
+  ponySelected: boolean;
+  ponyActive: boolean;
+  ponyUsable: boolean;
 }
 
 export interface PairInfo {
@@ -112,6 +131,8 @@ export class PhoneController {
   private unsubscribe?: () => void;
   private readonly store: SessionFile | null;
   readonly log: ActionLogEntry[] = [];
+  private phoneIme: ImeStatusInfo | null = null;
+  private lastScreenPkg?: string;
 
   constructor(private readonly options: ControllerOptions) {
     this.relayHttp = options.relayHttp.replace(/\/$/, "");
@@ -160,6 +181,9 @@ export class PhoneController {
       queued: this.inbox.length,
       lastError: this.lastError ?? (link?.state === "ended" ? link.reason ?? null : null),
       log: this.log.slice(0, 50),
+      ime: this.phoneIme,
+      imeCurrent: this.phoneIme?.current ?? null,
+      ponyKeyboardUsable: this.phoneIme?.ponyUsable ?? null,
     };
   }
 
@@ -204,7 +228,7 @@ export class PhoneController {
   }
 
   async tap(x: number, y: number, opts?: DisplayOpts, req?: RequestOptions): Promise<CommandResult> {
-    return this.command("tap", withDisplay({ x, y }, opts), 20_000, req);
+    return this.command("tap", withDisplay(this.withScreen({ x, y }), opts), 20_000, req);
   }
 
   async swipe(
@@ -216,7 +240,7 @@ export class PhoneController {
     opts?: DisplayOpts,
     req?: RequestOptions,
   ): Promise<CommandResult> {
-    return this.command("swipe", withDisplay({ x1, y1, x2, y2, durationMs }, opts), 15_000, req);
+    return this.command("swipe", withDisplay(this.withScreen({ x1, y1, x2, y2, durationMs }), opts), 15_000, req);
   }
 
   async longPress(
@@ -226,7 +250,7 @@ export class PhoneController {
     opts?: DisplayOpts,
     req?: RequestOptions,
   ): Promise<CommandResult> {
-    return this.command("long_press", withDisplay({ x, y, durationMs }, opts), 15_000, req);
+    return this.command("long_press", withDisplay(this.withScreen({ x, y, durationMs }), opts), 15_000, req);
   }
 
   async drag(
@@ -238,7 +262,7 @@ export class PhoneController {
     opts?: DisplayOpts,
     req?: RequestOptions,
   ): Promise<CommandResult> {
-    return this.command("drag", withDisplay({ x1, y1, x2, y2, durationMs }, opts), 15_000, req);
+    return this.command("drag", withDisplay(this.withScreen({ x1, y1, x2, y2, durationMs }), opts), 15_000, req);
   }
 
   async pinch(
@@ -250,12 +274,12 @@ export class PhoneController {
     opts?: DisplayOpts,
     req?: RequestOptions,
   ): Promise<CommandResult> {
-    return this.command("pinch", withDisplay({ x, y, fromDistance, toDistance, durationMs }, opts), 15_000, req);
+    return this.command("pinch", withDisplay(this.withScreen({ x, y, fromDistance, toDistance, durationMs }), opts), 15_000, req);
   }
 
   async typeText(
     text: string,
-    opts?: DisplayOpts & { mode?: "replace" | "append" },
+    opts?: DisplayOpts & { mode?: "insert" | "replace" | "append" },
     req?: RequestOptions,
   ): Promise<CommandResult> {
     const base = opts?.mode ? { text, mode: opts.mode } : { text };
@@ -343,11 +367,11 @@ export class PhoneController {
   }
 
   async askUser(text: string): Promise<CommandResult> {
-    return this.command("ask_user", { text }, 75_000);
+    return this.command("ask_user", { text }, OWNER_CLIENT_WAIT_MS);
   }
 
   async confirm(text: string): Promise<CommandResult> {
-    return this.command("confirm", { text }, 75_000);
+    return this.command("confirm", { text }, OWNER_CLIENT_WAIT_MS);
   }
 
   /** Finishes the owner's current request with a short result the phone shows and, for spoken requests, says. */
@@ -409,6 +433,7 @@ export class PhoneController {
     this.ensureLive();
     const session = this.session!;
     const result = await session.request(op, params, timeoutMs, req);
+    this.rememberScreen(result);
     this.append(op, describe(op, params, result), result.ok);
     if (!result.ok && result.error) this.lastError = result.error;
     if (!result.ok && session.state === "ended" && result.error === session.link().reason) {
@@ -522,6 +547,28 @@ export class PhoneController {
     } else {
       this.phoneEndsAt = null;
     }
+    const ime = info.result?.ime;
+    if (ime && typeof ime === "object") {
+      const body = ime as Record<string, unknown>;
+      this.phoneIme = {
+        current: typeof body.current === "string" ? body.current : null,
+        ponyEnabled: body.ponyEnabled === true,
+        ponySelected: body.ponySelected === true,
+        ponyActive: body.ponyActive === true,
+        ponyUsable: body.ponyUsable === true,
+      };
+    }
+    this.rememberScreen(info);
+  }
+
+  private rememberScreen(result: CommandResult): void {
+    const pkg = result.result?.foreground ?? result.result?.windowPkg ?? result.result?.packageName;
+    if (typeof pkg === "string" && pkg) this.lastScreenPkg = pkg;
+  }
+
+  private withScreen(params: CommandParams): CommandParams {
+    if (params.screenPkg || !this.lastScreenPkg) return params;
+    return { ...params, screenPkg: this.lastScreenPkg };
   }
 
   private isAttended(): boolean {

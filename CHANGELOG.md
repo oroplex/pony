@@ -2,6 +2,33 @@
 
 The first list under each version is what the phone shows in **Check for updates**. Keep those lines short and in plain English.
 
+## 0.6.3
+
+- Hidden-screen launches work again on Android 17 / One UI 9: Pony's trusted virtual display is created in its own display group so Settings, Keep, Chrome, and Calculator stay off your screen, in a full-size window.
+- If an app still can't run out of sight, it opens full screen on your phone — not a floating pop-up that cuts off the bottom toolbar.
+- The "can't run on the hidden screen" warning is only for that open. Home and later steps no longer keep naming the last app that bounced.
+- Typing honors the caret when Gboard or another keyboard is active, so `type` inserts instead of replacing the whole field. Pass replace or append when you want those. Status shows which keyboard is on and whether Pony's keyboard can type.
+- A tap or confirm that timed out on the assistant is dropped on the phone. Stale actions never run minutes later on whatever screen is up.
+
+### Details
+
+**Hidden display on Android 17**
+- One UI 9 / Android 17 stopped treating a trusted virtual display in the *default* display group as a host for other apps. `isActivityStartAllowedOnDisplay` and `am start --display` then bounce everything to a Samsung freeform window on the main screen (the `warn: main_screen` the owner saw). Pony now creates the Shizuku display with `OWN_DISPLAY_GROUP` + `ALWAYS_UNLOCKED` on API 37+, and sets the IME policy to local so the keyboard can appear on that display. Android 11–16 keep the previous flags.
+- Accessibility on Android 17 often cannot see virtual-display windows. The old landing check treated "a11y saw nothing" as a bounce and launched the same app again as freeform on the main screen — which is why a hidden-screen screenshot then showed the real screen. Landing now trusts a successful `am start -W` when a11y cannot see the display, and falls back to `dumpsys activity` for the top package.
+- Main-screen fallback is windowing mode fullscreen with the real panel size (`maximumWindowMetrics`). The old freeform + Samsung pop-up path used launch bounds that ran to y=3269 on a 3120px S26 Ultra and clipped the bottom toolbar.
+- `BackgroundHost.fallback` still steers later taps to the real screen after a bounce, but it no longer carries the bounced app's warning. An explicit `display: background` tries the hidden display again instead of silently screenshotting the main screen.
+
+**Typing and IME**
+- Default `type` mode is `insert`: ACTION_SET_TEXT composes around the caret/selection (`TextEntry.targetValue`) when the Pony keyboard is not the active IME (Gboard after the owner made it default). `replace` and `append` stay explicit. `info` and MCP `status` report `ime.current`, `ponyEnabled`, `ponySelected`, `ponyActive`, and `ponyUsable`.
+
+**Stale actions (safety)**
+- Every command is stamped with `id`, `issuedAt`, and `ttlMs` (15 s for taps, 30 s for open_app, 70 s for confirm/ask). The phone drops anything older than its TTL, or once the connector sends `cancel` after a timeout, and replies `expired` — it never executes it. A tap may also carry `screenPkg` from the last screenshot/`ui_tree`; the phone refuses with `screen_changed` if that package is no longer in front.
+- Confirm/ask prompts last 60 s on the phone. The connector waits 70 s (at least as long as the prompt) and cancels the on-phone sheet when it gives up, so a timeout is no longer logged as "declined" a minute later.
+- The relay already refuses `fwd` while the other side is away (`peer_missing`) and does not queue it for a later rejoin.
+
+**Release**
+- App and MCP are 0.6.3 (versionCode 10). CI builds an **unsigned** release APK (`:app:assembleRelease` → `app/build/outputs/apk/release/app-release-unsigned.apk`). Sign it with the existing private key outside this repo. No keystore is created or committed.
+
 ## 0.6.2
 
 - **Connect** now opens a picker of every brain Pony can use: your Grok Bot, plus Claude, Gemini, OpenAI, and xAI Grok that run right here on this phone with your own API key.

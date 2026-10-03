@@ -5,9 +5,35 @@ import android.content.Context
 import android.provider.Settings
 import android.view.inputmethod.InputMethodManager
 
+data class ImeSnapshot(
+    val currentId: String?,
+    val ponyEnabled: Boolean,
+    val ponySelected: Boolean,
+    val ponyActive: Boolean,
+) {
+    val ponyUsable: Boolean get() = ponyEnabled && (ponySelected || ponyActive)
+}
+
 object ImeStatus {
     fun component(context: Context): ComponentName =
         ComponentName(context, PonyInputMethodService::class.java)
+
+    fun currentId(context: Context): String? = try {
+        Settings.Secure.getString(context.contentResolver, Settings.Secure.DEFAULT_INPUT_METHOD)
+    } catch (_: SecurityException) {
+        null
+    }
+
+    fun snapshot(context: Context, ponyActive: Boolean = ImeBridge.active): ImeSnapshot {
+        val current = currentId(context)
+        val name = component(context)
+        return ImeSnapshot(
+            currentId = current,
+            ponyEnabled = enabled(context),
+            ponySelected = listed(current, name.flattenToString(), name.flattenToShortString()),
+            ponyActive = ponyActive,
+        )
+    }
 
     fun enabled(context: Context): Boolean {
         val imm = context.getSystemService(InputMethodManager::class.java) ?: return false

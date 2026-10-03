@@ -33,15 +33,10 @@ class DisplayPolicyTest {
     }
 
     @Test
-    fun theOwnerIsOnlyPromisedAPopUpWhereThePhoneHasThem() {
-        assertEquals(
-            "Calculator can't open out of sight on this phone. Open it in a pop-up on your screen? Pony will only ask once this session.",
-            DisplayPolicy.consentText("Calculator", popups = true),
-        )
-        assertEquals(
-            "Calculator can't open out of sight on this phone. Open it on your screen instead? Pony will only ask once this session.",
-            DisplayPolicy.consentText("Calculator", popups = false),
-        )
+    fun theOwnerIsAskedForAFullScreenFallback() {
+        val line = "Calculator can't open out of sight on this phone. Open it full screen on your screen instead? Pony will only ask once this session."
+        assertEquals(line, DisplayPolicy.consentText("Calculator", popups = true))
+        assertEquals(line, DisplayPolicy.consentText("Calculator", popups = false))
     }
 
     @Test
@@ -82,5 +77,12 @@ class DisplayPolicyTest {
     @Test
     fun maximizedBoundsStayPositive() {
         assertArrayEquals(intArrayOf(0, 0, 1, 1), DisplayPolicy.maximizedBounds(0, -5))
+    }
+
+    @Test
+    fun screenSizePrefersTheRealPanelOverTheAppWindow() {
+        // S26 Ultra panel is 1440x3120; the freeform chrome used to report 3269.
+        assertArrayEquals(intArrayOf(1440, 3120), DisplayPolicy.screenSize(1440, 2971, 1440, 3120))
+        assertArrayEquals(intArrayOf(1080, 2400), DisplayPolicy.screenSize(1080, 2400, 0, 0))
     }
 }

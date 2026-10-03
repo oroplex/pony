@@ -239,9 +239,14 @@ async function dispatch(session: PonySession, cmd: string, rest: string[]) {
         ...where,
       });
     case "type": {
-      const append = args[0] === "--append";
-      const words = append ? args.slice(1) : args;
-      return session.request("type", { text: words.join(" "), ...(append ? { mode: "append" as const } : {}), ...where }, 45_000);
+      const flag = args[0];
+      const mode = flag === "--append" || flag === "--replace" || flag === "--insert" ? flag.slice(2) : undefined;
+      const words = mode ? args.slice(1) : args;
+      return session.request(
+        "type",
+        { text: words.join(" "), ...(mode ? { mode: mode as "insert" | "replace" | "append" } : {}), ...where },
+        45_000,
+      );
     }
     case "press":
       return session.request("press", { key: args[0] as PressKey, ...where });

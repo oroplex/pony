@@ -5,6 +5,8 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.util.Base64
 import app.pony.companion.a11y.PonyAccessibilityService
+import app.pony.companion.a11y.TextEntry
+import app.pony.companion.a11y.TypeMode
 import app.pony.companion.brain.ScreenView
 import app.pony.companion.brain.ToolCall
 import app.pony.companion.display.ActionResult
@@ -96,11 +98,13 @@ object PhoneOps {
             }
             "type" -> {
                 val text = call.args["text"] ?: return "missing text"
-                val append = call.args["mode"].equals("append", ignoreCase = true) ||
-                    call.args["append"].equals("true", ignoreCase = true)
-                val acted = ScreenRouter.type(context, text, append, null, watch)
+                val mode = TextEntry.parseMode(
+                    call.args["mode"],
+                    call.args["append"].equals("true", ignoreCase = true),
+                )
+                val acted = ScreenRouter.type(context, text, mode, null, watch)
                 record(context, "type", StepKind.Type, "Typed ${text.length} characters", acted)
-                if (acted.ok && !append && text.isNotEmpty()) {
+                if (acted.ok && mode != TypeMode.APPEND && text.isNotEmpty()) {
                     UndoLog.record(TaskRuntime.current()?.id, UndoableAction.ClearDraft(text.length, foregroundApp()))
                 }
                 narrate(

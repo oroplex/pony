@@ -143,6 +143,8 @@ describe("relay sessions that survive a dropped connection", () => {
     phone.terminate();
     expect(await away).toEqual({ type: "peer_away" });
 
+    // A command sent while the phone is away is refused, not queued, so a
+    // timed-out tap cannot run minutes later when the phone rejoins.
     const lost = onceJson(bot);
     bot.send(JSON.stringify({ type: "fwd", data: "into the void" }));
     expect(await lost).toEqual({ type: "error", reason: "peer_missing" });

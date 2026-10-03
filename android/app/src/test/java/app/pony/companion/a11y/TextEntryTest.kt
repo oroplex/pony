@@ -38,6 +38,23 @@ class TextEntryTest {
     }
 
     @Test
+    fun parseModeDefaultsToInsert() {
+        assertEquals(TypeMode.INSERT, TextEntry.parseMode(null, false))
+        assertEquals(TypeMode.INSERT, TextEntry.parseMode("insert", false))
+        assertEquals(TypeMode.REPLACE, TextEntry.parseMode("replace", false))
+        assertEquals(TypeMode.APPEND, TextEntry.parseMode("append", false))
+        assertEquals(TypeMode.APPEND, TextEntry.parseMode(null, true))
+    }
+
+    @Test
+    fun setTextHonorsTheCaretUnlessReplaceOrAppendIsAsked() {
+        assertEquals("heXYllo", TextEntry.targetValue(TypeMode.INSERT, "hello", null, false, 2, 2, "XY"))
+        assertEquals("XY", TextEntry.targetValue(TypeMode.REPLACE, "hello", null, false, 2, 2, "XY"))
+        assertEquals("helloXY", TextEntry.targetValue(TypeMode.APPEND, "hello", null, false, 2, 2, "XY"))
+        assertEquals("XY", TextEntry.targetValue(TypeMode.INSERT, "Search", "Search", false, 0, 6, "XY"))
+    }
+
+    @Test
     fun passwordInputTypesAreRefused() {
         assertTrue(TextEntry.isPasswordField(true, 0))
         assertTrue(TextEntry.isPasswordField(false, 0x00000081))

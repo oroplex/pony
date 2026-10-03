@@ -5,7 +5,6 @@ import android.app.ActivityOptions
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.graphics.Rect
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
@@ -60,11 +59,16 @@ object BackgroundHost {
         fallback = null
     }
 
-    fun resolve(context: Context, choice: DisplayPolicy.Choice): ScreenTarget {
-        val width = context.resources.displayMetrics.widthPixels
-        val height = context.resources.displayMetrics.heightPixels
+    fun resolve(context: Context, choice: DisplayPolicy.Choice, explicitBackground: Boolean = false): ScreenTarget {
+        val (width, height) = DisplayPolicy.screenSize(context)
         if (choice == DisplayPolicy.Choice.MAIN) return ScreenTarget("main", Display.DEFAULT_DISPLAY, width, height, null)
-        fallback?.let { return ScreenTarget(it.placement, Display.DEFAULT_DISPLAY, width, height, it.warn, it.warnText) }
+        // A bounced open_app keeps later taps on the real screen, but the warning
+        // is per-action — Home must not still say "Keep Notes can't run…". An
+        // explicit background ask tries the hidden display again instead of
+        // silently screenshotting the main screen.
+        if (!explicitBackground) {
+            fallback?.let { return ScreenTarget(it.placement, Display.DEFAULT_DISPLAY, width, height, null, null) }
+        }
         if (VoicePrefs.shizukuEnhanced(context) && ShizukuBridge.granted()) {
             val id = ShizukuBridge.ensureDisplay(context, width, height, context.resources.displayMetrics.densityDpi)
             if (id > 0) return ScreenTarget("background", id, width, height, null)
@@ -126,13 +130,12 @@ object BackgroundHost {
         if (VoicePrefs.shizukuEnhanced(context) && ShizukuBridge.granted()) {
             openWithShell(context, packageName, intent)?.let { return it }
         }
-        val width = context.resources.displayMetrics.widthPixels
-        val height = context.resources.displayMetrics.heightPixels
+        val (width, height) = DisplayPolicy.screenSize(context)
         val host = own ?: VirtualDisplayHost(context.applicationContext).also { own = it }
         val displayId = host.ensure(width, height, context.resources.displayMetrics.densityDpi)
         if (displayId != null && allowed(context, displayId, intent)) {
             val options = ActivityOptions.makeBasic().apply { launchDisplayId = displayId }.toBundle()
-            if (start(context, intent, options) && landed(context, packageName, displayId)) {
+            if (start(context, intent, options) && landed(context, packageName, displayId, launchOk = true)) {
                 fallback = null
                 return OpenResult(true, null, ScreenTarget("background", displayId, width, height, null))
             }
@@ -147,18 +150,10 @@ object BackgroundHost {
         }
         val wait = beforeMain()
         if (!wait.ok) return OpenResult(false, wait.error, main(context, null, null), wait.waitedMs)
-        if (tryFreeform(context, intent)) {
-            try {
-                Thread.sleep(700)
-            } catch (_: InterruptedException) {
-                Thread.currentThread().interrupt()
-            }
-            val placement = PonyAccessibilityService.instance?.placementOf(packageName) ?: "main"
-            val next = fallbackFor(placement, label, packageName, explicitBackground)
-            fallback = next
-            return OpenResult(true, null, ScreenTarget(next.placement, Display.DEFAULT_DISPLAY, width, height, next.warn, next.warnText), wait.waitedMs)
-        }
-        val ok = start(context, intent, null)
+        // Full-screen on the main display — not a freeform / Samsung pop-up.
+        // Freeform launch bounds were taller than the panel (y=3269 on a
+        // 3120px S26 Ultra) and cut off the bottom toolbar.
+        val ok = tryFullscreenMain(context, intent)
         if (ok) fallback = fallbackFor("main", label, packageName, explicitBackground)
         return OpenResult(
             ok,
@@ -204,22 +199,23 @@ object BackgroundHost {
     }
 
     private fun openWithShell(context: Context, packageName: String, intent: Intent): OpenResult? {
-        val width = context.resources.displayMetrics.widthPixels
-        val height = context.resources.displayMetrics.heightPixels
+        val (width, height) = DisplayPolicy.screenSize(context)
         val id = ShizukuBridge.ensureDisplay(context, width, height, context.resources.displayMetrics.densityDpi)
         if (id <= 0) return null
         // An untrusted shell display can't host another app: am start would bounce
         // it onto the main screen without the owner's say-so. Leave that to the
-        // consent-gated pop-up path below.
+        // consent-gated full-screen path below.
         if (!ShizukuBridge.trusted(context)) return null
+        runCatching { ShizukuBridge.setImePolicy(context, id) }
         // Use the intent's own component. Only fall back to the launcher activity
         // for a launcher intent — a settings-action intent must not be redirected
         // to com.android.settings' home screen.
         val component = intent.component?.flattenToShortString()
             ?: (if (isLauncherIntent(intent)) resolveComponent(context, packageName) else null)
             ?: return null
-        if (!ShizukuBridge.launch(context, component, id)) return null
-        if (!landed(context, packageName, id)) return null
+        val launched = ShizukuBridge.launch(context, component, id)
+        if (!launched && !landed(context, packageName, id, launchOk = false)) return null
+        if (!landed(context, packageName, id, launchOk = launched)) return null
         fallback = null
         return OpenResult(true, null, ScreenTarget("background", id, width, height, null))
     }
@@ -232,12 +228,26 @@ object BackgroundHost {
      * refused app never arrives (it bounces to the main screen or fails), so this
      * returns false and the caller falls back instead of reporting "background".
      */
-    private fun landed(context: Context, packageName: String, displayId: Int, timeoutMs: Long = 3_000L): Boolean {
-        val a11y = PonyAccessibilityService.instance ?: return true
+    private fun landed(context: Context, packageName: String, displayId: Int, launchOk: Boolean, timeoutMs: Long = 3_000L): Boolean {
+        val a11y = PonyAccessibilityService.instance
         val own = context.packageName
+        if (a11y == null) {
+            val dumped = ShizukuBridge.topPackage(context, displayId)
+            return LaunchCheck.decide(packageName, dumped, null, own, launchOk, hiddenDisplayVisibleToA11y = false) ==
+                LaunchCheck.Landing.HIDDEN
+        }
         val deadline = System.currentTimeMillis() + timeoutMs
+        var last: LaunchCheck.Landing = LaunchCheck.Landing.UNKNOWN
         while (System.currentTimeMillis() < deadline) {
-            if (LaunchCheck.landedOnHidden(packageName, a11y.foregroundPackage(displayId), own)) return true
+            val hidden = a11y.foregroundPackage(displayId) ?: ShizukuBridge.topPackage(context, displayId)
+            val main = a11y.foregroundPackage(Display.DEFAULT_DISPLAY)
+            val sees = a11y.seesDisplay(displayId)
+            last = LaunchCheck.decide(packageName, hidden, main, own, launchOk, sees)
+            if (last == LaunchCheck.Landing.HIDDEN) return true
+            if (last == LaunchCheck.Landing.BOUNCED && sees && hidden != null && hidden != packageName) {
+                // A11y can see a different app on the hidden display — stop waiting.
+                break
+            }
             try {
                 Thread.sleep(150)
             } catch (_: InterruptedException) {
@@ -245,7 +255,9 @@ object BackgroundHost {
                 return false
             }
         }
-        return false
+        if (last == LaunchCheck.Landing.HIDDEN) return true
+        if (last == LaunchCheck.Landing.UNKNOWN && launchOk) return true
+        return last == LaunchCheck.Landing.HIDDEN
     }
 
     private fun resolveComponent(context: Context, packageName: String): String? {
@@ -255,34 +267,22 @@ object BackgroundHost {
         return "$packageName/${activity.name}"
     }
 
-    /** Samsung's pop-up view, or the platform freeform feature. */
+    /** Samsung's pop-up view, or the platform freeform feature. Used only in the consent question. */
     private fun popupsLikely(context: Context): Boolean =
         Build.MANUFACTURER.equals("samsung", ignoreCase = true) ||
             context.packageManager.hasSystemFeature(PackageManager.FEATURE_FREEFORM_WINDOW_MANAGEMENT) ||
             runCatching { Settings.Global.getInt(context.contentResolver, "enable_freeform_support", 0) == 1 }.getOrDefault(false)
 
-    private fun tryFreeform(context: Context, launch: Intent): Boolean {
-        val metrics = context.resources.displayMetrics
-        // Open maximized (the whole screen), not a small pop-up the owner has to
-        // maximize by hand. On OEMs with freeform windows this is a maximized
-        // freeform window; elsewhere it fills the screen.
-        val edges = DisplayPolicy.maximizedBounds(metrics.widthPixels, metrics.heightPixels)
-        val bounds = Rect(edges[0], edges[1], edges[2], edges[3])
+    /** Full-screen on the owner's display. No freeform chrome, no Samsung pop-up extras. */
+    private fun tryFullscreenMain(context: Context, launch: Intent): Boolean {
         val options = ActivityOptions.makeBasic()
         runCatching {
             ActivityOptions::class.java
                 .getMethod("setLaunchWindowingMode", Int::class.javaPrimitiveType)
-                .invoke(options, 5)
+                .invoke(options, ShellLaunch.WINDOWING_FULLSCREEN)
         }
-        runCatching {
-            ActivityOptions::class.java
-                .getMethod("setLaunchBounds", Rect::class.java)
-                .invoke(options, bounds)
-        }
-        launch.addFlags(Intent.FLAG_ACTIVITY_LAUNCH_ADJACENT or Intent.FLAG_ACTIVITY_MULTIPLE_TASK)
-        launch.putExtra("android.activity.windowingMode", 5)
-        launch.putExtra("com.samsung.android.multiwindow.activity.LAUNCH_IN_POPUP", true)
-        launch.putExtra("com.samsung.android.multiwindow.activity.LAUNCH_IN_POPUP_MAXIMIZE", true)
+        launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        launch.putExtra("android.activity.windowingMode", ShellLaunch.WINDOWING_FULLSCREEN)
         return start(context, launch, options.toBundle())
     }
 
@@ -310,7 +310,7 @@ object BackgroundHost {
     }
 
     private fun main(context: Context, warn: String?, warnText: String?): ScreenTarget {
-        val metrics = context.resources.displayMetrics
-        return ScreenTarget("main", Display.DEFAULT_DISPLAY, metrics.widthPixels, metrics.heightPixels, warn, warnText)
+        val (width, height) = DisplayPolicy.screenSize(context)
+        return ScreenTarget("main", Display.DEFAULT_DISPLAY, width, height, warn, warnText)
     }
 }

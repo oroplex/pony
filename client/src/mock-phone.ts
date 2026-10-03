@@ -1,4 +1,4 @@
-import { displayChoice, type CommandParams } from "@pony/shared";
+import { actionExpired, actionTtlMs, displayChoice, effectiveIssuedAt, screenChanged, type CommandParams } from "@pony/shared";
 
 import type { AppMessage, CommandResult, PonySession } from "./session.ts";
 
@@ -73,6 +73,9 @@ export class MockPhone {
     const p = msg.params ?? {};
     this.log.push(op ?? "unknown");
     this.calls.push({ op: op ?? "unknown", params: p });
+    if (op && op !== "wait_for_request" && actionExpired(effectiveIssuedAt(p.issuedAt, Date.now()), p.ttlMs, Date.now(), actionTtlMs(op))) {
+      return { ok: false, error: "expired" };
+    }
 
     switch (op) {
       case "ping":
@@ -82,10 +85,17 @@ export class MockPhone {
           ok: true,
           result: {
             app: "Pony Companion (mock)",
-            version: "0.6.2",
-            features: ["resume", "tasks", "done", "deferral", "cover_check", "listen"],
+            version: "0.6.3",
+            features: ["resume", "tasks", "done", "deferral", "cover_check", "listen", "action_ttl"],
             sessionEndsAt: this.sessionEndsAt,
             now: Date.now(),
+            ime: {
+              current: "app.pony.companion/.input.PonyInputMethodService",
+              ponyEnabled: true,
+              ponySelected: true,
+              ponyActive: false,
+              ponyUsable: true,
+            },
           },
         };
       case "screenshot":
@@ -102,11 +112,15 @@ export class MockPhone {
             width: 1080,
             height: 2400,
             source: "mock",
+            foreground: "com.android.settings",
             ...place(p),
           },
         };
       case "tap":
-        return { ok: true, result: { x: p.x, y: p.y, ...place(p) } };
+        if (screenChanged(p.screenPkg, "com.android.settings")) {
+          return { ok: false, error: "screen_changed", result: { foreground: "com.android.settings", screenPkg: p.screenPkg } };
+        }
+        return { ok: true, result: { x: p.x, y: p.y, foreground: "com.android.settings", ...place(p) } };
       case "swipe":
         return {
           ok: true,
@@ -135,10 +149,11 @@ export class MockPhone {
         if (this.focusedIsPassword) {
           return { ok: false, error: "password_field" };
         }
-        this.lastTyped = p.mode === "append" ? (this.lastTyped ?? "") + (p.text ?? "") : p.text;
+        this.lastTyped =
+          p.mode === "append" ? (this.lastTyped ?? "") + (p.text ?? "") : p.text;
         return {
           ok: true,
-          result: { length: p.text?.length ?? 0, method: "set_text", mode: p.mode ?? "replace", ...place(p) },
+          result: { length: p.text?.length ?? 0, method: "set_text", mode: p.mode ?? "insert", ...place(p) },
         };
       case "press":
         return { ok: true, result: { key: p.key, ...place(p) } };
@@ -151,6 +166,7 @@ export class MockPhone {
           ok: true,
           result: {
             ...place(p),
+            foreground: "com.android.settings",
             tree: [
               "FrameLayout bounds=0,0,1080,2400",
               "  TextView \"Messages\" clickable bounds=40,80,400,140",

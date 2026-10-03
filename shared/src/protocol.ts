@@ -67,13 +67,14 @@ export type CommandOp =
   | "ask_user"
   | "confirm"
   | "done"
-  | "info";
+  | "info"
+  | "cancel";
 
 export type PressKey = "back" | "home" | "recents" | "enter" | "search" | "go" | "send" | "next" | "done";
 
 /**
- * `type` replaces the focused field's text by default (it overwrites whatever is there);
- * pass `mode: "append"` to add to the end instead of replacing.
+ * `type` inserts at the caret by default (it replaces only the current selection).
+ * Pass `mode: "replace"` to overwrite the whole field, or `mode: "append"` to add at the end.
  * The phone replies with result.method: `ime` (Pony keyboard), `set_text`, `paste`, or `key_events`.
  * `paste` happens only when the owner opted in. `key_events` is a last resort and includes result.warn.
  * Password fields return error `password_field`. `ime_disabled` and `ime_required` mean the Pony keyboard is not ready.
@@ -95,8 +96,21 @@ export interface CommandParams {
   /** For `pinch`: how far apart the two fingers end, in pixels. Larger than `fromDistance` zooms in. */
   toDistance?: number;
   text?: string;
-  /** For `type`: replace the field (default) or append to its current text. */
-  mode?: "replace" | "append";
+  /** For `type`: insert at the caret (default), replace the whole field, or append at the end. */
+  mode?: "insert" | "replace" | "append";
+  /**
+   * When the connector sent this command (unix ms). The phone drops it once
+   * [ttlMs] has passed, so a tap that timed out on this side cannot run later.
+   */
+  issuedAt?: number;
+  /** How long the phone may hold this command before reporting `expired`. */
+  ttlMs?: number;
+  /**
+   * Foreground package the tap was aimed at (from the last screenshot / ui_tree).
+   * The phone refuses with `screen_changed` if something else is in front.
+   */
+  screenPkg?: string;
+  screenActivity?: string;
   key?: PressKey;
   packageName?: string;
   /**

@@ -16,6 +16,14 @@ class ImeStatusTest {
     }
 
     @Test
+    fun ponyUsableRequiresEnabledAndSelectedOrActive() {
+        assertTrue(ImeSnapshot("gboard", ponyEnabled = true, ponySelected = true, ponyActive = false).ponyUsable)
+        assertTrue(ImeSnapshot("gboard", ponyEnabled = true, ponySelected = false, ponyActive = true).ponyUsable)
+        assertFalse(ImeSnapshot("gboard", ponyEnabled = false, ponySelected = false, ponyActive = false).ponyUsable)
+        assertFalse(ImeSnapshot("gboard", ponyEnabled = true, ponySelected = false, ponyActive = false).ponyUsable)
+    }
+
+    @Test
     fun missesOtherKeyboardsAndBlankLists() {
         assertFalse(ImeStatus.listed("com.samsung.android.honeyboard/.service.HoneyBoardService", id, id))
         assertFalse(ImeStatus.listed(null, id, id))

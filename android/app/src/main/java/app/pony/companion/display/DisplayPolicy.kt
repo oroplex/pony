@@ -1,6 +1,8 @@
 package app.pony.companion.display
 
 import android.content.Context
+import android.os.Build
+import android.view.WindowManager
 import app.pony.companion.voice.VoicePrefs
 import org.json.JSONObject
 
@@ -51,19 +53,38 @@ object DisplayPolicy {
         "$app can't run on Pony's hidden screen. Banking and other secure apps often refuse it. The owner chose not to open it on the main screen."
 
     /**
-     * A refused app falls back to a window on the main screen. Open it maximized
-     * — filling the whole screen — so the owner never has to tap "maximize" on a
-     * tiny pop-up. Returned as [left, top, right, bottom].
+     * A refused app falls back full-screen on the main display. Bounds are the
+     * real panel, not the app window plus freeform chrome (which ran past
+     * y=3269 on a 3120px Galaxy S26 Ultra).
      */
     fun maximizedBounds(width: Int, height: Int): IntArray =
         intArrayOf(0, 0, width.coerceAtLeast(1), height.coerceAtLeast(1))
 
-    /** What the owner is asked. Only promise a pop-up where the phone has pop-up windows. */
-    fun consentText(app: String, popups: Boolean) = if (popups) {
-        "$app can't open out of sight on this phone. Open it in a pop-up on your screen? Pony will only ask once this session."
-    } else {
-        "$app can't open out of sight on this phone. Open it on your screen instead? Pony will only ask once this session."
+    /** Physical display size, so a fallback window matches the panel. */
+    fun screenSize(widthPx: Int, heightPx: Int, realWidth: Int, realHeight: Int): IntArray {
+        val w = realWidth.coerceAtLeast(widthPx).coerceAtLeast(1)
+        val h = realHeight.coerceAtLeast(heightPx).coerceAtLeast(1)
+        return intArrayOf(w, h)
     }
+
+    fun screenSize(context: Context): Pair<Int, Int> {
+        val metrics = context.resources.displayMetrics
+        val real = if (Build.VERSION.SDK_INT >= 30) {
+            runCatching {
+                val bounds = context.getSystemService(WindowManager::class.java).maximumWindowMetrics.bounds
+                bounds.width() to bounds.height()
+            }.getOrNull()
+        } else {
+            null
+        }
+        val sized = screenSize(metrics.widthPixels, metrics.heightPixels, real?.first ?: 0, real?.second ?: 0)
+        return sized[0] to sized[1]
+    }
+
+    /** What the owner is asked. Fallback is always full-screen, never a freeform pop-up. */
+    @Suppress("UNUSED_PARAMETER")
+    fun consentText(app: String, popups: Boolean) =
+        "$app can't open out of sight on this phone. Open it full screen on your screen instead? Pony will only ask once this session."
 
     enum class Choice { MAIN, BACKGROUND }
 

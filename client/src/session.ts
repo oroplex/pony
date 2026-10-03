@@ -8,6 +8,7 @@ import {
   type ProgressEvent,
   type RelayOutbound,
   PROTOCOL_VERSION,
+  actionTtlMs,
   b64urlDecode,
   b64urlEncode,
   decryptJson,
@@ -353,11 +354,16 @@ export class PonySession {
     const blocked = await this.admit(timeoutMs);
     if (blocked) return { ok: false, error: blocked };
     const id = newMessageId();
+    const stamped: CommandParams = {
+      ...params,
+      issuedAt: params.issuedAt ?? Date.now(),
+      ttlMs: params.ttlMs ?? actionTtlMs(op),
+    };
     return new Promise<CommandResult>((resolve, reject) => {
       const entry: Pending = { op, resolve, reject, deadline: Date.now() + timeoutMs, onProgress: opts.onProgress };
       entry.timer = this.arm(id, entry, timeoutMs);
       this.pending.set(id, entry);
-      if (!this.sendEncrypted({ id, kind: "req", op, params })) {
+      if (!this.sendEncrypted({ id, kind: "req", op, params: stamped })) {
         clearTimeout(entry.timer);
         this.pending.delete(id);
         resolve({ ok: false, error: "connection_lost" });
@@ -424,8 +430,19 @@ export class PonySession {
     return setTimeout(() => {
       if (this.pending.get(id) !== entry) return;
       this.pending.delete(id);
+      this.sendCancel(id);
       entry.reject(new Error(`timed out waiting for ${entry.op}`));
     }, Math.max(0, ms));
+  }
+
+  /** Tells the phone to drop this command if it has not run yet. */
+  private sendCancel(ref: string): void {
+    this.sendEncrypted({
+      id: newMessageId(),
+      kind: "evt",
+      op: "cancel",
+      result: { ref },
+    });
   }
 
   private failPending(error: string): void {

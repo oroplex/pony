@@ -6,7 +6,14 @@ import { generateKeyPair } from "@pony/shared";
 import { createRelay, type StartedRelay } from "../../relay/src/server.ts";
 
 import { MockPhone } from "./mock-phone.ts";
-import { PonySession, backoffDelay, type LinkState, type ProgressEvent, type ReconnectOptions } from "./session.ts";
+import {
+  PonySession,
+  backoffDelay,
+  type AppMessage,
+  type LinkState,
+  type ProgressEvent,
+  type ReconnectOptions,
+} from "./session.ts";
 
 let relay: StartedRelay | undefined;
 const sessions: PonySession[] = [];
@@ -221,6 +228,31 @@ describe("sessions that survive dropped connections", () => {
     const { bot, phoneSession } = await paired();
     phoneSession.onRequest = () => new Promise(() => undefined);
     await expect(bot.request("tap", { x: 1, y: 1 }, 150)).rejects.toThrow("timed out waiting for tap");
+  });
+
+  it("cancels a timed-out command so the phone does not run it later", async () => {
+    const { bot, phoneSession } = await paired();
+    const seen: AppMessage[] = [];
+    phoneSession.onEvent = (msg) => seen.push(msg);
+    phoneSession.onRequest = () => new Promise(() => undefined);
+    await expect(bot.request("tap", { x: 1, y: 1 }, 150)).rejects.toThrow("timed out waiting for tap");
+    await sleep(50);
+    expect(seen.some((msg) => msg.op === "cancel" && typeof msg.result?.ref === "string")).toBe(true);
+  });
+
+  it("stamps issuedAt and ttlMs on every command", async () => {
+    const { bot, phone } = await paired();
+    const before = Date.now();
+    await bot.request("ping");
+    const ping = phone.calls.find((call) => call.op === "ping");
+    expect(ping?.params.issuedAt).toBeGreaterThanOrEqual(before);
+    expect(ping?.params.ttlMs).toBe(15_000);
+  });
+
+  it("drops a tap whose TTL has already passed", async () => {
+    const { bot } = await paired();
+    const result = await bot.request("tap", { x: 1, y: 1, issuedAt: Date.now() - 60_000, ttlMs: 15_000 });
+    expect(result).toEqual({ ok: false, error: "expired" });
   });
 
   it("saves the pairing and rejoins it after a restart", async () => {
