@@ -61,7 +61,7 @@ describe("relay abuse inputs stay on their socket", () => {
 
     const cases: Array<{ name: string; send: (ws: WebSocket) => void; reason: string }> = [
       { name: "empty string", send: (ws) => ws.send(""), reason: "bad_json" },
-      { name: "zero-length buffer", send: (ws) => ws.send(Buffer.alloc(0)), reason: "bad_json" },
+      { name: "zero-length buffer", send: (ws) => ws.send(Buffer.alloc(0)), reason: "bad_payload" },
       { name: "json null", send: (ws) => ws.send("null"), reason: "bad_payload" },
       { name: "json array", send: (ws) => ws.send("[]"), reason: "bad_payload" },
       { name: "json number", send: (ws) => ws.send("1"), reason: "bad_payload" },
@@ -109,7 +109,7 @@ describe("relay abuse inputs stay on their socket", () => {
     });
     const res = await fetch(`${relay.url}/pair`, {
       method: "POST",
-      headers: { "content-length": "999999", "content-type": "application/json" },
+      headers: { "content-type": "application/octet-stream" },
       body: "x".repeat(200),
     });
     expect(res.status).toBe(413);

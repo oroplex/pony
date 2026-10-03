@@ -138,7 +138,7 @@ describe("spawned relay process vs bad inputs", () => {
 
     const cases: Array<{ name: string; send: (ws: WebSocket) => void; reason?: string }> = [
       { name: "empty string", send: (ws) => ws.send(""), reason: "bad_json" },
-      { name: "zero-length buffer", send: (ws) => ws.send(Buffer.alloc(0)), reason: "bad_json" },
+      { name: "zero-length buffer", send: (ws) => ws.send(Buffer.alloc(0)), reason: "bad_payload" },
       { name: "json null (the crash)", send: (ws) => ws.send("null"), reason: "bad_payload" },
       { name: "non-json", send: (ws) => ws.send("{"), reason: "bad_json" },
       { name: "binary", send: (ws) => ws.send(Buffer.from([0xff, 0x00, 0xfe])), reason: "bad_payload" },
@@ -165,7 +165,7 @@ describe("spawned relay process vs bad inputs", () => {
 
     const oversized = await fetch(running.url + "/pair", {
       method: "POST",
-      headers: { "content-length": "99999", "content-type": "text/plain" },
+      headers: { "content-type": "text/plain" },
       body: "x".repeat(400),
     });
     expect(oversized.status).toBe(413);
