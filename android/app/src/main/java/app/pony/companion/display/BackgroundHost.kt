@@ -233,7 +233,8 @@ object BackgroundHost {
         val own = context.packageName
         if (a11y == null) {
             val dumped = ShizukuBridge.topPackage(context, displayId)
-            return LaunchCheck.decide(packageName, dumped, null, own, launchOk, hiddenDisplayVisibleToA11y = false) ==
+            val main = ShizukuBridge.topPackage(context, Display.DEFAULT_DISPLAY)
+            return LaunchCheck.decide(packageName, dumped, main, own, launchOk, hiddenDisplayVisibleToA11y = false) ==
                 LaunchCheck.Landing.HIDDEN
         }
         val deadline = System.currentTimeMillis() + timeoutMs
@@ -241,6 +242,7 @@ object BackgroundHost {
         while (System.currentTimeMillis() < deadline) {
             val hidden = a11y.foregroundPackage(displayId) ?: ShizukuBridge.topPackage(context, displayId)
             val main = a11y.foregroundPackage(Display.DEFAULT_DISPLAY)
+                ?: ShizukuBridge.topPackage(context, Display.DEFAULT_DISPLAY)
             val sees = a11y.seesDisplay(displayId)
             last = LaunchCheck.decide(packageName, hidden, main, own, launchOk, sees)
             if (last == LaunchCheck.Landing.HIDDEN) return true

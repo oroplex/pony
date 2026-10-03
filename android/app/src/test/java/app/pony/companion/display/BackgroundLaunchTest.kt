@@ -85,6 +85,7 @@ class BackgroundLaunchTest {
         assertEquals("com.android.settings", ShellLaunch.parseTopPackage(dump, 7))
         assertEquals("com.google.android.keep", ShellLaunch.parseTopPackage(dump, 0))
         assertEquals(null, ShellLaunch.parseTopPackage(dump, 9))
+        assertEquals(null, ShellLaunch.parseTopPackage(dump, -1))
     }
 
     @Test

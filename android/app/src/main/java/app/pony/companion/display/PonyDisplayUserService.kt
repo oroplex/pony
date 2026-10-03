@@ -59,7 +59,7 @@ class PonyDisplayUserService(private val context: Context) : IPonyDisplay.Stub()
     }
 
     override fun topPackage(displayId: Int): String {
-        if (displayId <= 0) return ""
+        if (displayId < 0) return ""
         return ShellLaunch.parseTopPackage(execOut(ShellLaunch.activitiesDumpArgs()), displayId).orEmpty()
     }
 

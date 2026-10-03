@@ -82,7 +82,7 @@ object ShellLaunch {
      * this is the landing check when a11y reports nothing.
      */
     fun parseTopPackage(dump: String?, displayId: Int): String? {
-        if (dump.isNullOrBlank() || displayId <= 0) return null
+        if (dump.isNullOrBlank() || displayId < 0) return null
         val displayMark = Regex("""(?:mDisplayId|displayId)\s*=\s*$displayId\b""")
         val component = Regex("""([a-zA-Z0-9._]+)/[a-zA-Z0-9._/]+""")
         val blocks = dump.split(Regex("(?=ActivityRecord\\{)|(?=TaskRecord\\{)|(?=\\* Task)"))
