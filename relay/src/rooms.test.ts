@@ -170,3 +170,17 @@ describe("PairingHub resume", () => {
     expect(hub.join(token, "bot", fakeSocket("bot2"), true)).toEqual({ error: "unknown_token" });
   });
 });
+
+describe("PairingHub per-IP accounting", () => {
+  it("counts rooms by the IP that created the token", () => {
+    const hub = new PairingHub();
+    hub.createToken("b1".repeat(32), "203.0.113.4");
+    hub.createToken("b2".repeat(32), "203.0.113.4");
+    hub.createToken("b3".repeat(32), "198.51.100.8");
+    expect(hub.countForIp("203.0.113.4")).toBe(2);
+    expect(hub.countForIp("198.51.100.8")).toBe(1);
+    expect(hub.countForIp("192.0.2.1")).toBe(0);
+    hub.drop("b1".repeat(32));
+    expect(hub.countForIp("203.0.113.4")).toBe(1);
+  });
+});
