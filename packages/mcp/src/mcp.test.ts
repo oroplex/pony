@@ -318,6 +318,42 @@ describe("pony mcp", () => {
     expect(tap.isError).toBeFalsy();
   });
 
+  it("runs the first acting command after confirm and again after the phone reconnects", async () => {
+    const caller = await startMcp();
+    const paired = JSON.parse(textOf(await caller.callTool({ name: "pair", arguments: {} }))) as { payload: string };
+    const phone = await connectPhone(paired.payload);
+    await waitConnected(caller);
+    expect((await statusOf(caller)).ownerConfirmed).toBe(false);
+    const blocked = await caller.callTool({ name: "tap", arguments: { x: 1, y: 1 } });
+    expect(blocked.isError).toBe(true);
+    expect(textOf(blocked)).toContain("not_confirmed");
+
+    const phoneSession = sessions.at(-1)!;
+    phoneSession.confirmOwner();
+    await until(() => mcp!.controller.status().ownerConfirmed, "owner confirmed");
+    const first = await caller.callTool({ name: "tap", arguments: { x: 4, y: 5 } });
+    expect(first.isError).toBeFalsy();
+    expect(JSON.parse(textOf(first)).result).toMatchObject({ x: 4, y: 5 });
+
+    const saved = phoneSession.save();
+    expect(saved.role).toBe("phone");
+    expect(saved.ownerConfirmed).toBe(true);
+    phoneSession.close();
+    await until(() => mcp!.controller.status().connected === false, "the computer to see the phone drop");
+
+    const again = PonySession.resumePhone(saved, { reconnect: FAST });
+    sessions.push(again);
+    phone.attach(again);
+    await again.waitUntilReady(5_000);
+    await until(() => mcp!.controller.status().connected === true, "the computer to see the phone back");
+    const status = await statusOf(caller);
+    expect(status.ownerConfirmed).toBe(true);
+    expect(status.resumed).toBe(true);
+    const second = await caller.callTool({ name: "tap", arguments: { x: 6, y: 7 } });
+    expect(second.isError).toBeFalsy();
+    expect(JSON.parse(textOf(second)).result).toMatchObject({ x: 6, y: 7 });
+  });
+
   it("routes voice tools without logging the spoken text", async () => {
     const caller = await startMcp();
     const paired = JSON.parse(textOf(await caller.callTool({ name: "pair", arguments: {} }))) as {

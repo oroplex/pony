@@ -87,10 +87,10 @@ export interface LinkStatus {
   resumed: boolean;
 }
 
-/** Everything a bot needs to rejoin its session after a restart. Holds a private key. Store it 0600. */
+/** Everything a side needs to rejoin its session after a restart. Holds a private key. Store it 0600. */
 export interface SavedSession {
   v: 1;
-  role: "bot";
+  role: "bot" | "phone";
   payload: PairingPayload;
   socketUrl: string;
   privateKey: string;
@@ -250,17 +250,33 @@ export class PonySession {
     saved: SavedSession,
     opts: { socketUrl?: string; reconnect?: ReconnectOptions | false } = {},
   ): PonySession {
-    const checked = checkSaved(saved);
+    return PonySession.resumeSaved(saved, "bot", opts);
+  }
+
+  /** Phone-side Reconnect: same keys and confirmation as the vault on the device. */
+  static resumePhone(
+    saved: SavedSession,
+    opts: { socketUrl?: string; reconnect?: ReconnectOptions | false } = {},
+  ): PonySession {
+    return PonySession.resumeSaved(saved, "phone", opts);
+  }
+
+  private static resumeSaved(
+    saved: SavedSession,
+    role: "bot" | "phone",
+    opts: { socketUrl?: string; reconnect?: ReconnectOptions | false },
+  ): PonySession {
+    const checked = checkSaved(saved, role);
     const privateKey = b64urlDecode(checked.privateKey);
     const session = new PonySession(
-      "bot",
+      role,
       checked.payload,
       privateKey,
       b64urlDecode(checked.publicKey),
       checked.clientName,
       opts.reconnect,
     );
-    session.keys = deriveSessionKeys(privateKey, b64urlDecode(checked.peerKey), checked.payload.token, "bot");
+    session.keys = deriveSessionKeys(privateKey, b64urlDecode(checked.peerKey), checked.payload.token, role);
     session.peerKey = checked.peerKey;
     session.pairedAt = checked.pairedAt;
     session.ownerConfirmed = checked.ownerConfirmed === true;
@@ -308,14 +324,14 @@ export class PonySession {
     return formatSafetyCode(this.keys.safetyCode);
   }
 
-  /** The bot's side of a finished pairing, for [resumeBot]. */
+  /** This side of a finished pairing, for [resumeBot] / [resumePhone]. */
   save(): SavedSession {
-    if (this.role !== "bot" || !this.keys || !this.peerKey) {
+    if (!this.keys || !this.peerKey) {
       throw new Error("nothing to save until the phone finishes pairing");
     }
     return {
       v: 1,
-      role: "bot",
+      role: this.role,
       payload: this.payload,
       socketUrl: this.wsUrl,
       privateKey: b64urlEncode(this.privateKey),
@@ -793,8 +809,8 @@ function socketPath(url: string): string {
   return `${origin}/ws`;
 }
 
-function checkSaved(saved: SavedSession): SavedSession {
-  if (!saved || saved.v !== 1 || saved.role !== "bot") throw new Error("not a saved Pony session");
+function checkSaved(saved: SavedSession, role: "bot" | "phone" = "bot"): SavedSession {
+  if (!saved || saved.v !== 1 || saved.role !== role) throw new Error("not a saved Pony session");
   const payload = parsePairing(JSON.stringify(saved.payload));
   for (const field of ["socketUrl", "privateKey", "publicKey", "peerKey"] as const) {
     if (typeof saved[field] !== "string" || !saved[field]) throw new Error(`saved session is missing ${field}`);

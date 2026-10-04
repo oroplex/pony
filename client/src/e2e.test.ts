@@ -161,6 +161,39 @@ describe("sessions that survive dropped connections", () => {
     expect(bot.link()).toMatchObject({ reason: "peer_left", endedBy: "time_limit" });
   });
 
+  it("confirms the safety code then runs the first acting command", async () => {
+    const { bot, phoneSession } = await paired();
+    expect(bot.ownerConfirmed).toBe(false);
+    phoneSession.confirmOwner();
+    const deadline = Date.now() + 2_000;
+    while (!bot.ownerConfirmed && Date.now() < deadline) await sleep(20);
+    expect(bot.ownerConfirmed).toBe(true);
+    expect((await bot.request("tap", { x: 4, y: 5 })).result).toMatchObject({ x: 4, y: 5 });
+  });
+
+  it("reconnects a confirmed phone session and keeps acting", async () => {
+    const { bot, phone, phoneSession } = await paired({ bot: FAST, phone: FAST });
+    phoneSession.confirmOwner();
+    const deadline = Date.now() + 2_000;
+    while (!bot.ownerConfirmed && Date.now() < deadline) await sleep(20);
+    expect((await bot.request("tap", { x: 1, y: 2 })).ok).toBe(true);
+
+    const saved = phoneSession.save();
+    expect(saved).toMatchObject({ role: "phone", ownerConfirmed: true });
+    const away = reached(bot, "away");
+    phoneSession.close();
+    await away;
+
+    const again = PonySession.resumePhone(saved, { reconnect: FAST });
+    sessions.push(again);
+    phone.attach(again);
+    await Promise.all([bot.waitUntilReady(5_000), again.waitUntilReady(5_000)]);
+    expect(bot.ownerConfirmed).toBe(true);
+    expect(again.ownerConfirmed).toBe(true);
+    expect(bot.link().resumed).toBe(true);
+    expect((await bot.request("tap", { x: 8, y: 9 })).result).toMatchObject({ x: 8, y: 9 });
+  });
+
   it("holds the session while the phone drops off, then carries on with the same keys", async () => {
     const { bot, phoneSession } = await paired({ bot: FAST, phone: FAST });
     const code = bot.safetyCode();

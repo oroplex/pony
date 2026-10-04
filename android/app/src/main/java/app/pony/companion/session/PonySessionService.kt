@@ -112,30 +112,42 @@ class PonySessionService : Service(), RelayClient.Listener {
                 return START_STICKY
             }
             ACTION_CONFIRM -> {
-                worker.execute { confirmOwner() }
+                ended.set(false)
+                startInForeground(projection != null, connectedStatus(snapshot?.clientName) ?: getString(R.string.notif_title))
+                worker.execute {
+                    ensureSession(null)
+                    confirmOwner()
+                }
                 return START_STICKY
             }
             ACTION_ATTACH -> {
+                ended.set(false)
                 try {
+                    // MediaProjection must be claimed only after this process is a
+                    // mediaProjection FGS. Doing it the other way around throws on
+                    // Android 14+ and Samsung kills the service.
+                    startInForeground(true, connectedStatus(snapshot?.clientName) ?: getString(R.string.notif_title))
                     attachProjection(intent)
-                    startInForeground(true, connectedStatus(snapshot?.clientName))
                 } catch (e: Exception) {
-                    fail("Could not start screen sharing: ${e.message}")
+                    keepLinkAfterProjectionFailure(e)
                 }
+                worker.execute { ensureSession(null) }
                 return START_STICKY
             }
             ACTION_START -> {
                 val payload = intent.getStringExtra(EXTRA_PAIRING) ?: return START_NOT_STICKY
                 val hasProjection = intent.getIntExtra(EXTRA_PROJECTION_CODE, 0) != 0
                 ended.set(false)
-                startInForeground(hasProjection, getString(R.string.notif_title))
                 try {
+                    startInForeground(hasProjection, getString(R.string.notif_title))
                     attachProjection(intent)
                 } catch (e: Exception) {
-                    fail("Could not start screen sharing: ${e.message}")
-                    return START_NOT_STICKY
+                    if (hasProjection) keepLinkAfterProjectionFailure(e) else {
+                        fail("Could not start screen sharing: ${e.message}")
+                        return START_NOT_STICKY
+                    }
                 }
-                worker.execute { begin(payload) }
+                worker.execute { startOrResume(payload) }
             }
             ACTION_RESUME, null -> {
                 ended.set(false)
@@ -146,6 +158,41 @@ class PonySessionService : Service(), RelayClient.Listener {
         return START_STICKY
     }
 
+    /**
+     * Inert pairing and a later FGS restart share ACTION_START. If the vault
+     * already holds this token (the owner tapped It matches), resume it.
+     * Minting a new keypair would close the socket the computer just confirmed.
+     */
+    private fun startOrResume(raw: String) {
+        val pairing = try {
+            PairingPayload.parse(raw)
+        } catch (e: Exception) {
+            fail("That pairing code isn't valid: ${e.message}")
+            return
+        }
+        if (PairingGate.alreadyLive(snapshot, pairing.token, keys != null) && !ended.get()) return
+        val saved = snapshot ?: runCatching { vault.load() }.getOrNull()
+        if (PairingGate.shouldResume(saved, pairing.token, System.currentTimeMillis())) {
+            resume()
+            return
+        }
+        begin(raw)
+    }
+
+    /** Restore a saved session when confirm/attach arrives after a service bounce. */
+    private fun ensureSession(pairingToken: String?) {
+        if (PairingGate.alreadyLive(snapshot, pairingToken, keys != null) && !ended.get()) return
+        val saved = snapshot ?: runCatching { vault.load() }.getOrNull()
+        if (PairingGate.shouldResume(saved, pairingToken, System.currentTimeMillis())) resume()
+    }
+
+    private fun keepLinkAfterProjectionFailure(e: Exception) {
+        val message = "Could not start screen sharing: ${e.message}"
+        append("error", message, false)
+        SessionRepository.update { it.copy(lastError = message) }
+        runCatching { startInForeground(false, connectedStatus(snapshot?.clientName) ?: getString(R.string.notif_title)) }
+    }
+
     private fun begin(raw: String) {
         val pairing = try {
             PairingPayload.parse(raw)
@@ -153,6 +200,7 @@ class PonySessionService : Service(), RelayClient.Listener {
             fail("That pairing code isn't valid: ${e.message}")
             return
         }
+        if (PairingGate.alreadyLive(snapshot, pairing.token, keys != null) && !ended.get()) return
         relay?.close()
         relay = null
         val pair = SessionCrypto.generateKeyPair()
@@ -174,6 +222,8 @@ class PonySessionService : Service(), RelayClient.Listener {
         )
         ownerConfirmed = false
         protocolVersion = pairing.v
+        sendCounter.restore(0, 0)
+        recvCounter.restore(0, 0)
         phone = pair
         keys = derived
         snapshot = next
@@ -1046,10 +1096,12 @@ class PonySessionService : Service(), RelayClient.Listener {
     private fun relayName(relay: String): String = if (CleartextPolicy.isCloud(relay)) "Pony Cloud" else "a private relay"
 
     private fun startInForeground(hasProjection: Boolean, text: String) {
+        val special = if (Build.VERSION.SDK_INT >= 34) ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE else 0
         val types = when {
+            hasProjection && Build.VERSION.SDK_INT >= 34 ->
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION or special
             hasProjection -> ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
-            Build.VERSION.SDK_INT >= 34 -> ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
-            else -> 0
+            else -> special
         }
         ServiceCompat.startForeground(this, NOTIF_ID, notification(text), types)
     }
@@ -1145,7 +1197,13 @@ class PonySessionService : Service(), RelayClient.Listener {
                 .setAction(ACTION_ATTACH)
                 .putExtra(EXTRA_PROJECTION_CODE, projectionCode)
             if (projectionData != null) intent.putExtra(EXTRA_PROJECTION_DATA, projectionData)
-            context.startForegroundService(intent)
+            // The session FGS is already running from startInert. A second
+            // startForegroundService can bounce the service and redeliver ACTION_START.
+            try {
+                context.startService(intent)
+            } catch (_: Exception) {
+                context.startForegroundService(intent)
+            }
         }
 
         fun start(context: Context, pairingJson: String, projectionCode: Int, projectionData: Intent?) {

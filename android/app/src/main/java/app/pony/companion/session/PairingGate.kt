@@ -22,4 +22,22 @@ object PairingGate {
 
     /** A background VIEW must not rewrite brain / relay prefs. */
     fun applyTemplateFromViewIntent(): Boolean = false
+
+    /**
+     * After It matches, Android may bounce the session service and redeliver
+     * the inert start intent. That must resume the vault (same keys, same
+     * confirmation) instead of minting a new keypair and tearing the socket
+     * down. A different pairing token still starts fresh.
+     */
+    fun shouldResume(saved: SessionSnapshot?, pairingToken: String?, now: Long): Boolean {
+        if (saved == null || !saved.resumable(now)) return false
+        if (pairingToken != null && !saved.token.equals(pairingToken, ignoreCase = true)) return false
+        return true
+    }
+
+    /** In-memory session for this token: do not call begin() again. */
+    fun alreadyLive(snapshot: SessionSnapshot?, pairingToken: String?, hasKeys: Boolean): Boolean {
+        if (!hasKeys || snapshot == null) return false
+        return pairingToken == null || snapshot.token.equals(pairingToken, ignoreCase = true)
+    }
 }
