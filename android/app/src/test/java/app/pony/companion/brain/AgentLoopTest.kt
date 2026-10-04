@@ -208,9 +208,10 @@ class AgentLoopTest {
         assertTrue(prompt.contains("don't open a messaging app"))
         // Plain answers, no markdown.
         assertTrue(prompt.contains("no markdown"))
-        // Settings changes don't need a confirmation; only the risky verbs do.
-        assertTrue(prompt.contains("needs no confirmation"))
-        assertFalse(prompt.contains("changes security settings"))
+        // Security settings need a confirmation, matching the README.
+        assertTrue(prompt.contains("changing security settings needs the owner's yes"))
+        assertFalse(prompt.contains("needs no confirmation"))
+        assertTrue(prompt.contains("<untrusted-screen>"))
         // An ambiguous target (several contacts named Sam) asks instead of guessing.
         assertTrue(prompt.contains("don't guess"))
         assertTrue(prompt.contains("ask tool"))

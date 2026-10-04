@@ -4,6 +4,7 @@ import com.google.crypto.tink.subtle.ChaCha20Poly1305
 import com.google.crypto.tink.subtle.Hkdf
 import com.google.crypto.tink.subtle.X25519
 import app.pony.companion.proto.AEAD_AAD
+import app.pony.companion.proto.AEAD_AAD_V2
 import app.pony.companion.proto.HKDF_INFO
 import app.pony.companion.proto.SAFETY_INFO
 import java.security.MessageDigest
@@ -17,6 +18,8 @@ data class SessionKeys(
     val shared: ByteArray,
     val safetyCode: String,
 )
+
+data class DecryptedFrame(val plaintext: ByteArray, val seq: Long?)
 
 object SessionCrypto {
     fun generateKeyPair(): KeyPairBytes {
@@ -54,14 +57,46 @@ object SessionCrypto {
 
     fun formatSafety(code: String): String = "${code.substring(0, 3)}-${code.substring(3)}"
 
-    fun encrypt(key: ByteArray, plaintext: ByteArray): ByteArray {
-        val aead = ChaCha20Poly1305(key)
-        return aead.encrypt(plaintext, AEAD_AAD.toByteArray())
+    fun aeadAad(seq: Long?): ByteArray {
+        if (seq == null) return AEAD_AAD.toByteArray()
+        val prefix = AEAD_AAD_V2.toByteArray()
+        val out = ByteArray(prefix.size + 8)
+        prefix.copyInto(out)
+        writeUint64BE(out, prefix.size, seq)
+        return out
     }
 
-    fun decrypt(key: ByteArray, frame: ByteArray): ByteArray {
+    fun encrypt(key: ByteArray, plaintext: ByteArray, seq: Long? = null): ByteArray {
         val aead = ChaCha20Poly1305(key)
-        return aead.decrypt(frame, AEAD_AAD.toByteArray())
+        val blob = aead.encrypt(plaintext, aeadAad(seq))
+        if (seq == null) return blob
+        val prefix = ByteArray(8)
+        writeUint64BE(prefix, 0, seq)
+        return prefix + blob
+    }
+
+    fun decrypt(key: ByteArray, frame: ByteArray, seq: Long? = null): ByteArray {
+        if (seq != null) {
+            require(frame.size >= 8 + 12 + 16) { "ciphertext too short" }
+            val framed = readUint64BE(frame, 0)
+            require(framed == seq) { "seq mismatch" }
+            return decryptBlob(key, frame.copyOfRange(8, frame.size), seq)
+        }
+        return decryptBlob(key, frame, null)
+    }
+
+    fun decryptFrame(key: ByteArray, frame: ByteArray, protocolVersion: Int): DecryptedFrame {
+        if (protocolVersion >= 2) {
+            require(frame.size >= 8 + 12 + 16) { "ciphertext too short" }
+            val seq = readUint64BE(frame, 0)
+            return DecryptedFrame(decryptBlob(key, frame.copyOfRange(8, frame.size), seq), seq)
+        }
+        return DecryptedFrame(decryptBlob(key, frame, null), null)
+    }
+
+    private fun decryptBlob(key: ByteArray, blob: ByteArray, seq: Long?): ByteArray {
+        val aead = ChaCha20Poly1305(key)
+        return aead.decrypt(blob, aeadAad(seq))
     }
 
     fun b64urlEncode(bytes: ByteArray): String =
@@ -75,5 +110,21 @@ object SessionCrypto {
         return ByteArray(hex.length / 2) { i ->
             hex.substring(i * 2, i * 2 + 2).toInt(16).toByte()
         }
+    }
+
+    private fun writeUint64BE(out: ByteArray, offset: Int, value: Long) {
+        var n = value
+        for (i in 7 downTo 0) {
+            out[offset + i] = (n and 0xffL).toByte()
+            n = n ushr 8
+        }
+    }
+
+    private fun readUint64BE(bytes: ByteArray, offset: Int): Long {
+        var n = 0L
+        for (i in 0 until 8) {
+            n = (n shl 8) or (bytes[offset + i].toLong() and 0xffL)
+        }
+        return n
     }
 }

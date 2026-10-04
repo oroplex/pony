@@ -27,7 +27,6 @@ import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import app.pony.companion.a11y.PonyAccessibilityService
-import app.pony.companion.brain.GrokArrival
 import app.pony.companion.brain.PONY_GROK_BOT_TEMPLATE_URL
 import app.pony.companion.display.ShizukuBridge
 import app.pony.companion.net.CleartextPolicy
@@ -35,6 +34,7 @@ import app.pony.companion.overlay.AppVisibility
 import app.pony.companion.proto.PairingLinks
 import app.pony.companion.proto.PairingPayload
 import app.pony.companion.session.Connection
+import app.pony.companion.session.PairingGate
 import app.pony.companion.session.PonySessionService
 import app.pony.companion.session.Readiness
 import app.pony.companion.session.SessionRepository
@@ -66,7 +66,11 @@ class MainActivity : ComponentActivity() {
             SessionRepository.update {
                 it.copy(connection = Connection.Pairing, status = "Starting the session…", lastError = null)
             }
-            PonySessionService.start(this, qr, result.resultCode, result.data)
+            if (SessionRepository.snapshot().busy || SessionRepository.snapshot().ownerConfirmed) {
+                PonySessionService.attachProjection(this, result.resultCode, result.data)
+            } else {
+                PonySessionService.start(this, qr, result.resultCode, result.data)
+            }
         } else {
             if (qr != null) vm.holdLink(qr)
             vm.scanError = "Screen sharing was declined. Pony asks once per session and won't connect without it."
@@ -173,6 +177,7 @@ class MainActivity : ComponentActivity() {
         },
         pair = ::beginPairing,
         usePending = { vm.pendingLink?.let(::beginPairing) },
+        confirmPair = ::confirmPair,
         disconnect = { PonySessionService.stop(this) },
         reconnect = {
             if (!PonySessionService.resume(this)) {
@@ -218,17 +223,18 @@ class MainActivity : ComponentActivity() {
     private fun handleIntent(intent: Intent?) {
         if (intent == null) return
         if (intent.getBooleanExtra(EXTRA_REQUEST_MIC, false)) {
+            val honor = PairingGate.honorRequestMic(
+                actionIsView = intent.action == Intent.ACTION_VIEW,
+                hasValidNonce = InternalIntents.consumeMicNonce(intent.getStringExtra(InternalIntents.EXTRA_NONCE)),
+            )
             intent.removeExtra(EXTRA_REQUEST_MIC)
-            listenAfterMic = false
-            micLauncher.launch(Manifest.permission.RECORD_AUDIO)
-            return
+            if (honor) {
+                listenAfterMic = false
+                micLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                return
+            }
         }
         val raw = intent.dataString
-        val client = intent.getStringExtra("client") ?: PairingLinks.clientParam(raw)
-        val relay = raw?.let { link ->
-            if (!PairingLinks.looksLikePairing(link)) null else runCatching { PairingLinks.fields(link).relay }.getOrNull()
-        }
-        if (GrokArrival.matches(client)) vm.applyGrokTemplate(relay)
         if (intent.action != Intent.ACTION_VIEW || raw == null || !PairingLinks.looksLikePairing(raw)) return
         if (runCatching { PairingLinks.fields(raw) }.isFailure) return
         intent.data = null
@@ -291,8 +297,19 @@ class MainActivity : ComponentActivity() {
         if (connection == Connection.Reconnecting || connection == Connection.Error) PonySessionService.stop(this)
         CleartextPolicy.canonical(relay)?.let { VoicePrefs.rememberRelay(this, it) }
         vm.scanError = null
-        vm.beginCapture(json)
+        vm.holdPairing(json)
         if (vm.nav.current != Route.Pair && !vm.nav.current.onboarding) vm.nav.push(Route.Pair)
+        PonySessionService.startInert(this, json)
+    }
+
+    /**
+     * The owner compared the six-digit code. Only then do we tell the
+     * assistant it may act, and only then do we ask for screen capture.
+     */
+    private fun confirmPair() {
+        val json = vm.pendingPayload ?: return
+        PonySessionService.confirmOwner(this)
+        vm.beginCapture(json)
         val manager = getSystemService(MediaProjectionManager::class.java)
         projectionLauncher.launch(manager.createScreenCaptureIntent())
     }

@@ -42,6 +42,10 @@ class SessionCryptoTest {
         )
         val plain = String(SessionCrypto.decrypt(bot.recv, frame))
         assertEquals("{\"op\":\"ping\"}", plain)
+        val keyed = SessionCrypto.encrypt(phone.send, "{\"op\":\"tap\"}".toByteArray(), 3L)
+        val opened = SessionCrypto.decryptFrame(bot.recv, keyed, 2)
+        assertEquals(3L, opened.seq)
+        assertEquals("{\"op\":\"tap\"}", String(opened.plaintext))
     }
 
     private fun hex(bytes: ByteArray): String = bytes.joinToString("") { "%02x".format(it) }

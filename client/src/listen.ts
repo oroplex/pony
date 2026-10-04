@@ -3,7 +3,7 @@ import { chmodSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync }
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
-import { PAIRING_TTL_MS, REQUEST_POLL_MS, pairPageLink, pairingLink } from "@pony/shared";
+import { PAIRING_TTL_MS, REQUEST_POLL_MS, b64urlDecode, b64urlEncode, encrypt, decrypt, pairPageLink, pairingLink } from "@pony/shared";
 
 import {
   ENDED_REASONS,
@@ -28,7 +28,9 @@ export function defaultStatePath(name: string): string {
   return join(base, name);
 }
 
-/** A saved pairing on disk. The file holds the bot's private key, so it is written 0600. */
+const MCP_FILE_MAGIC = "pony-mcp1.";
+
+/** A saved pairing on disk. The file holds the bot's private key, so it is written 0600 and encrypted. */
 export class SessionFile {
   constructor(readonly path: string) {}
 
@@ -40,7 +42,7 @@ export class SessionFile {
       return null;
     }
     try {
-      const parsed = JSON.parse(raw) as SavedSession;
+      const parsed = JSON.parse(this.decode(raw.trim())) as SavedSession;
       return parsed?.v === 1 && parsed.role === "bot" ? parsed : null;
     } catch {
       return null;
@@ -51,10 +53,12 @@ export class SessionFile {
     const dir = dirname(this.path);
     mkdirSync(dir, { recursive: true, mode: 0o700 });
     const tmp = `${this.path}.${process.pid}.tmp`;
-    writeFileSync(tmp, `${JSON.stringify(saved, null, 2)}\n`, { mode: 0o600 });
+    const body = this.encode(JSON.stringify(saved, null, 2));
+    writeFileSync(tmp, `${body}\n`, { mode: 0o600 });
     renameSync(tmp, this.path);
     try {
       chmodSync(this.path, 0o600);
+      chmodSync(this.keyPath(), 0o600);
     } catch {
       // Not every filesystem has POSIX modes.
     }
@@ -62,6 +66,46 @@ export class SessionFile {
 
   clear(): void {
     rmSync(this.path, { force: true });
+    rmSync(this.keyPath(), { force: true });
+  }
+
+  private keyPath(): string {
+    return `${this.path}.key`;
+  }
+
+  private fileKey(): Uint8Array {
+    const path = this.keyPath();
+    try {
+      const existing = readFileSync(path);
+      if (existing.length === 32) return existing;
+    } catch {
+      /* create below */
+    }
+    const key = new Uint8Array(32);
+    crypto.getRandomValues(key);
+    mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+    writeFileSync(path, key, { mode: 0o600 });
+    try {
+      chmodSync(path, 0o600);
+    } catch {
+      /* ignore */
+    }
+    return key;
+  }
+
+  private encode(json: string): string {
+    const bytes = encrypt(this.fileKey(), new TextEncoder().encode(json));
+    return MCP_FILE_MAGIC + b64urlEncode(bytes);
+  }
+
+  /** Encrypted `pony-mcp1.` blobs, or a leftover plaintext JSON file from 0.6.4. */
+  private decode(raw: string): string {
+    if (raw.startsWith(MCP_FILE_MAGIC)) {
+      const plain = decrypt(this.fileKey(), b64urlDecode(raw.slice(MCP_FILE_MAGIC.length)));
+      return new TextDecoder().decode(plain);
+    }
+    if (raw.startsWith("{")) return raw;
+    throw new Error("unreadable session file");
   }
 }
 
@@ -353,6 +397,13 @@ export async function runListen(options: ListenOptions): Promise<ListenHandle> {
     async stop() {
       stopped = true;
       listener?.dispose();
+      if (live.keys) {
+        try {
+          store.save(live.save());
+        } catch {
+          /* next run may have to pair again */
+        }
+      }
       live.close();
       await finished;
     },

@@ -8,6 +8,6 @@
     android:canRetrieveWindowContent="true"
     android:canTakeScreenshot="true"
     android:description="@string/a11y_description"
-    android:isAccessibilityTool="true"
+    android:isAccessibilityTool="false"
     android:notificationTimeout="100"
     android:settingsActivity="app.pony.companion.MainActivity" />

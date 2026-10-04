@@ -19,7 +19,7 @@ You need the Pony app on an Android 11+ phone (see the [project README](https://
 }
 ```
 
-The assistant calls `pair` and shows a QR code or a `pony://pair` link. Scan it with the phone, compare the six-digit safety code, and accept screen sharing. With `--listen` the pairing is kept in `~/.pony/mcp.json` and rejoined on start.
+The assistant calls `pair` and shows a QR code or a `pony://pair` link. Scan it with the phone, compare the six-digit safety code, and tap **It matches**. Acting tools return `not_confirmed` until that happens. With `--listen` the pairing is kept in `~/.pony/mcp.json` (encrypted, mode `600`) and rejoined on start.
 
 ## Streamable HTTP, once published on npm
 

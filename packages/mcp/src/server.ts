@@ -9,7 +9,7 @@ import type { CommandResult, ProgressEvent, RequestOptions } from "@pony/client"
 
 import { PhoneController, endedMessage, type ControllerOptions, type DisplayOpts } from "./controller.ts";
 
-export const PONY_MCP_VERSION = "0.6.4";
+export const PONY_MCP_VERSION = "0.6.5";
 
 const displayArgs = {
   background: z
@@ -29,11 +29,11 @@ function displayOf(args: { background?: boolean; display?: "main" | "background"
 const INSTRUCTIONS = `Pony controls one paired Android phone through the user's relay.
 
 Call pair first and show the user the QR image or the pony://pair link. The QR is the same JSON the phone scans. The pony:// link, or the pairPageLink web page, is for when that QR is on the phone itself — the page opens Pony directly. A pairing token expires in 15 minutes.
-The safety code is empty until the phone finishes the handshake. Call status and compare that code with the phone before you tap, type, or open apps.
+The safety code is empty until the phone finishes the handshake. Acting tools return not_confirmed until the owner taps It matches on the phone. Call status and wait until ownerConfirmed is true. Do not treat a prompt as the control — the phone must send the confirmation.
 The phone decides how long a session lasts (30 minutes by default; the owner can pick longer). status shows expiresAt. When it ends, commands are refused. Call pair again.
 The session survives dropped connections. If a command fails with peer_away or connection_lost, wait a few seconds and retry; status.link shows "away" or "reconnecting" until the phone is back. peer_left means the owner ended the session.
 Password fields are refused. Do not try to read or type them.
-type inserts text at the cursor (mode insert) and does not open the keyboard. Pass mode replace to overwrite the field, or append to add at the end. If method is key_events, warn the user. status reports the active IME and whether the Pony keyboard is usable.
+type replaces the focused field by default. Pass mode insert to type at the caret, or append to add at the end. If method is key_events, warn the user. status reports the active IME and whether the Pony keyboard is usable.
 For setup tasks (keyboard, languages, voice typing, autocorrect), open_settings jumps straight to a settings screen by name — input_method, keyboard_settings (the current keyboard's own options), languages, voice_input, or app_details (with packageName) — so taps don't get lost in menus that swallow touches on protected screens.
 Call disconnect when the user is done.
 The owner can also ask the phone for things, by voice or by typing. Keep calling wait_for_request in a loop while you are available: it returns requestId, text, and source, or {"empty":true}; call it again after empty. When you finish a request, call done with a one-sentence result; the phone shows it and says it for spoken requests. speak says a sentence out loud. ask_user asks and returns what they said. confirm asks for yes or no and returns {"accepted":true|false}. A no is not an error.
@@ -60,7 +60,7 @@ export function createPonyMcp(options: ControllerOptions): PonyMcp {
     {
       title: "Pair a phone",
       description:
-        "Start a pairing session. Returns a QR PNG, the pony://pair link, a pairPageLink hand-off page (for when the QR is on the phone itself), the one-time token, and the QR JSON. safetyCode is null until the phone connects; call status to read it. Does not include the bot private key.",
+        "Start a pairing session. Returns a QR PNG, the pony://pair link, a pairPageLink hand-off page (fields in the URL fragment), the one-time token, and the QR JSON. safetyCode is null until the phone connects. Acting tools stay off until the owner taps It matches. Needs Pony 0.6.5 or later. Does not include the bot private key.",
       inputSchema: z.object({
         waitMs: z.number().int().min(0).max(60_000).optional(),
         relay: z.string().min(1).optional(),
@@ -70,8 +70,8 @@ export function createPonyMcp(options: ControllerOptions): PonyMcp {
       try {
         const info = await controller.pair({ waitMs, relay });
         const note = info.safetyCode
-          ? "Compare this safety code with the phone before acting."
-          : "Safety code is not ready until the phone connects. Call status and compare it before acting.";
+          ? "Compare this safety code with the phone. Acting tools stay off until the owner taps It matches. This pairing needs Pony 0.6.5 or later."
+          : "Safety code is not ready until the phone connects. Acting tools return not_confirmed until the owner taps It matches. This pairing needs Pony 0.6.5 or later.";
         const summary = {
           token: info.token,
           pairingLink: info.pairingLink,

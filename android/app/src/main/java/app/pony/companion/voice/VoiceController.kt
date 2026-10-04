@@ -5,6 +5,7 @@ import android.content.Intent
 import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
+import app.pony.companion.InternalActionsActivity
 import app.pony.companion.MainActivity
 import app.pony.companion.a11y.PonyAccessibilityService
 import app.pony.companion.brain.AgentLoop
@@ -327,8 +328,8 @@ object VoiceController {
     fun openPonyFor(action: NoticeAction?) {
         val app = appContext ?: return
         dismissNotice()
-        val intent = Intent(app, MainActivity::class.java)
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        val intent = Intent(app, InternalActionsActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             .putExtra(MainActivity.EXTRA_REQUEST_MIC, action == NoticeAction.ALLOW_MIC)
         runCatching {
             PonyAccessibilityService.instance?.launch(intent, null) ?: app.startActivity(intent)
@@ -826,25 +827,50 @@ object VoiceController {
     }
 
     private fun guardFor(app: Context, call: ToolCall): Guard {
-        val verdict = when (call.name) {
-            "tap" -> {
+        val display = ScreenRouter.targetFor(app, null).displayId
+        val password = PonyAccessibilityService.instance?.focusedIsPassword(display) == true
+        val target = when (call.name) {
+            "tap", "long_press" -> {
                 val x = call.args["x"]?.toDoubleOrNull()
                 val y = call.args["y"]?.toDoubleOrNull()
-                val target = if (x != null && y != null) ScreenRouter.tapTarget(app, x, y, null) else TapTarget(call.args["label"].orEmpty())
-                SafetyPolicy.forTap(target.copy(label = target.label.ifBlank { call.args["label"].orEmpty() }))
+                if (x != null && y != null) ScreenRouter.tapTarget(app, x, y, null) else TapTarget(call.args["label"].orEmpty())
             }
-            "type" -> {
-                val display = ScreenRouter.targetFor(app, null).displayId
-                SafetyPolicy.forType(PonyAccessibilityService.instance?.focusedIsPassword(display) == true)
+            "swipe", "drag" -> {
+                val x = call.args["x1"]?.toDoubleOrNull()
+                val y = call.args["y1"]?.toDoubleOrNull()
+                if (x != null && y != null) ScreenRouter.tapTarget(app, x, y, null) else foregroundTarget(app)
             }
-            "open_app" -> SafetyPolicy.forOpenApp(call.args["package"] ?: call.args["packageName"].orEmpty())
-            else -> Verdict.Allow
+            "open_app" -> TapTarget(
+                call.args["label"].orEmpty(),
+                packageName = call.args["package"] ?: call.args["packageName"],
+                appLabel = call.args["label"],
+            )
+            "type" -> TapTarget("", isPassword = password)
+            else -> foregroundTarget(app)
         }
+        if (call.name == "remember") {
+            val key = call.args["key"]?.trim().orEmpty().ifBlank { "that" }
+            return Guard.Confirm("Remember “$key”?")
+        }
+        if (call.name == "schedule_task") {
+            val task = call.args["task"]?.trim().orEmpty().ifBlank { "this" }
+            return Guard.Confirm("Schedule “$task”?")
+        }
+        val verdict = SafetyPolicy.forAction(
+            op = if (call.name == "key") "press" else call.name,
+            target = target.copy(label = target.label.ifBlank { call.args["label"].orEmpty() }),
+            key = call.args["key"],
+        )
         return when (verdict) {
             Verdict.Allow -> Guard.Allow
             is Verdict.Confirm -> Guard.Confirm(verdict.prompt)
             is Verdict.Block -> Guard.Refuse(verdict.reason)
         }
+    }
+
+    private fun foregroundTarget(app: Context): TapTarget {
+        val pkg = PonyAccessibilityService.instance?.foregroundPackage()
+        return TapTarget("", packageName = pkg, appLabel = pkg?.let { BackgroundHost.appLabel(app, it) })
     }
 
     private fun watchFor(gen: Int, taskId: String) = object : Watch {

@@ -16,7 +16,9 @@ object ActionExpiry {
     const val OWNER_CLIENT_WAIT_MS = 70_000L
     const val CLOCK_SKEW_MS = 120_000L
     const val EXPIRED = "expired"
+    const val CLOCK_SKEW = "clock_skew"
     const val SCREEN_CHANGED = "screen_changed"
+    const val REPLAYED = "replayed"
 
     fun ttlMs(op: String?): Long = when (op) {
         "confirm", "ask_user" -> OWNER_CLIENT_WAIT_MS
@@ -27,14 +29,26 @@ object ActionExpiry {
         else -> DEFAULT_TTL_MS
     }
 
+    sealed class IssuedAt {
+        data class Ok(val at: Long) : IssuedAt()
+        data object Skewed : IssuedAt()
+    }
+
     /**
-     * Prefer the client's stamp when it is close to receive time. A missing or
-     * wildly skewed stamp falls back to when the phone got the frame, so a
-     * queued command still expires even if an older client omitted [issuedAt].
+     * Prefer the client's stamp when it is close to receive time. A missing
+     * stamp falls back to when the phone got the frame. A wildly skewed stamp
+     * is [IssuedAt.Skewed] — never restamped to now.
      */
+    fun resolveIssuedAt(clientIssuedAt: Long?, receivedAt: Long): IssuedAt {
+        if (clientIssuedAt == null || clientIssuedAt <= 0L) return IssuedAt.Ok(receivedAt)
+        return if (kotlin.math.abs(clientIssuedAt - receivedAt) > CLOCK_SKEW_MS) IssuedAt.Skewed else IssuedAt.Ok(clientIssuedAt)
+    }
+
     fun effectiveIssuedAt(clientIssuedAt: Long?, receivedAt: Long): Long {
-        if (clientIssuedAt == null || clientIssuedAt <= 0L) return receivedAt
-        return if (kotlin.math.abs(clientIssuedAt - receivedAt) > CLOCK_SKEW_MS) receivedAt else clientIssuedAt
+        return when (val resolved = resolveIssuedAt(clientIssuedAt, receivedAt)) {
+            is IssuedAt.Ok -> resolved.at
+            IssuedAt.Skewed -> error(CLOCK_SKEW)
+        }
     }
 
     fun expired(issuedAt: Long?, ttlMs: Long?, now: Long, fallbackTtlMs: Long): Boolean {

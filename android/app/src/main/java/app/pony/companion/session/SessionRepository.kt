@@ -25,6 +25,7 @@ data class SessionUi(
     val nextRetryAt: Long? = null,
     val resumable: Boolean = false,
     val endedReason: String? = null,
+    val ownerConfirmed: Boolean = false,
 ) {
     val live: Boolean get() = connection == Connection.Connected || connection == Connection.Reconnecting
     val busy: Boolean get() = connection == Connection.Pairing || connection == Connection.Ending || live
@@ -62,6 +63,7 @@ object SessionRepository {
                 peerAway = false,
                 reconnectAttempt = 0,
                 nextRetryAt = null,
+                ownerConfirmed = false,
             )
         }
     }

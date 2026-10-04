@@ -68,6 +68,8 @@ data class PairState(
     val safetyCode: String?,
     val connectedName: String?,
     val grokName: String,
+    val relayHost: String? = null,
+    val ownerConfirmed: Boolean = false,
 )
 
 @Composable
@@ -79,6 +81,7 @@ fun PairScreen(
     onTemplate: () -> Unit,
     onListenHelp: () -> Unit,
     onDone: () -> Unit,
+    onConfirm: () -> Unit = onDone,
     onBack: () -> Unit,
     scanner: @Composable () -> Unit,
 ) {
@@ -88,18 +91,36 @@ fun PairScreen(
     PonyPage(
         title = if (code != null) "Compare the code" else "Connect ${state.grokName}",
         subtitle = if (code != null) {
-            "Make sure ${state.grokName} shows the same six digits before it acts."
+            "Make sure ${state.grokName} shows the same six digits. Nothing starts until you tap It matches."
         } else {
             "Scan the code ${state.grokName} shows, or paste its pony:// link. Pairing codes last 15 minutes."
         },
         onBack = onBack,
         bottomBar = if (code != null) {
-            { PonyButton(if (state.connectedName != null) "It matches" else "Waiting for ${state.grokName}…", onDone, enabled = state.connectedName != null, icon = PonyIcons.Check, haptic = Haptic.SUCCESS) }
+            {
+                PonyButton(
+                    if (state.ownerConfirmed) "Sharing the screen…"
+                    else if (code != null) "It matches"
+                    else "Waiting for ${state.grokName}…",
+                    onConfirm,
+                    enabled = code != null && !state.ownerConfirmed,
+                    icon = PonyIcons.Check,
+                    haptic = Haptic.SUCCESS,
+                )
+            }
         } else {
             null
         },
     ) {
         if (code != null) {
+            state.relayHost?.let { host ->
+                Banner(
+                    "Pairing with $host",
+                    Tone.Iris,
+                    body = "Only tap It matches if this is the assistant you just asked to pair.",
+                    icon = PonyIcons.Link,
+                )
+            }
             SafetyCodeCard(code, state.connectedName ?: state.grokName, connected = state.connectedName != null)
             return@PonyPage
         }

@@ -112,6 +112,61 @@ class SafetyPolicyTest {
     }
 
     @Test
+    fun everyActingVerbAsksOnAMoneyScreen() {
+        val venmo = TapTarget("Friends", packageName = "com.venmo", appLabel = "Venmo")
+        for (op in listOf("tap", "swipe", "drag", "long_press", "pinch", "type")) {
+            val verdict = SafetyPolicy.forAction(op, venmo)
+            assertTrue(op, verdict is Verdict.Confirm)
+            assertEquals(op, "payment_app", (verdict as Verdict.Confirm).reason)
+        }
+        val press = SafetyPolicy.forPress("enter", venmo)
+        assertTrue(press is Verdict.Confirm)
+        val open = SafetyPolicy.forOpenApp("com.venmo", "Venmo")
+        assertTrue(open is Verdict.Confirm)
+    }
+
+    @Test
+    fun pressSendAndEnterAskInMessagingApps() {
+        val chat = TapTarget("", packageName = "com.whatsapp", appLabel = "WhatsApp")
+        assertEquals("send", (SafetyPolicy.forPress("send", chat) as Verdict.Confirm).reason)
+        assertEquals("send", (SafetyPolicy.forPress("enter", chat) as Verdict.Confirm).reason)
+        assertEquals(Verdict.Allow, SafetyPolicy.forPress("back", chat))
+    }
+
+    @Test
+    fun pressOnARiskyLabelAsksJustLikeTap() {
+        val delete = TapTarget("Delete")
+        assertEquals("delete", (SafetyPolicy.forPress("enter", delete) as Verdict.Confirm).reason)
+        assertEquals("Delete this?", (SafetyPolicy.forPress("delete", delete) as Verdict.Confirm).prompt)
+        assertEquals("Send this?", (SafetyPolicy.forPress("send", TapTarget("Send")) as Verdict.Confirm).prompt)
+        assertEquals(Verdict.Allow, SafetyPolicy.forPress("enter", TapTarget("Display")))
+    }
+
+    @Test
+    fun unlabeledSendIconAndLocaleWordsAsk() {
+        val icon = SafetyPolicy.forTap(
+            TapTarget("", packageName = "com.whatsapp", appLabel = "WhatsApp", viewId = "com.whatsapp:id/send", className = "android.widget.ImageButton"),
+        )
+        assertEquals("send", (icon as Verdict.Confirm).reason)
+        assertEquals("Send this?", prompt(TapTarget("Enviar")))
+        assertEquals("Pay?", prompt(TapTarget("Pagar")))
+        assertEquals("Buy this?", prompt(TapTarget("Acheter")))
+        assertEquals("Delete this?", prompt(TapTarget("Löschen")))
+        assertEquals("Send this?", prompt(TapTarget("送信")))
+        assertEquals("Pay?", prompt(TapTarget("결제")))
+        assertEquals("Send this?", prompt(TapTarget("发送")))
+        assertEquals("Send this?", prompt(TapTarget("שלח")))
+        assertEquals("Send this?", prompt(TapTarget("भेजें")))
+        assertEquals("Send this?", prompt(TapTarget("إرسال")))
+    }
+
+    @Test
+    fun ponyCannotOpenItsOwnPackage() {
+        assertEquals(Verdict.Block("own_app"), SafetyPolicy.forOpenApp("app.pony.companion", "Pony"))
+        assertEquals(Verdict.Block("own_app"), SafetyPolicy.forOpenApp("app.pony.companion.debug", "Pony"))
+    }
+
+    @Test
     fun existingLabelMatchingStillWorksOnAndOffMoneyScreens() {
         assertEquals("Pay $24.99?", prompt(TapTarget("Pay $24.99")))
         assertEquals("Send this?", prompt(TapTarget("Send")))

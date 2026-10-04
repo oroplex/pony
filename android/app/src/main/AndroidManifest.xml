@@ -94,6 +94,11 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".InternalActionsActivity"
+            android:exported="false"
+            android:theme="@style/Theme.Pony.Transparent" />
+
         <service
             android:name=".a11y.PonyAccessibilityService"
             android:exported="true"

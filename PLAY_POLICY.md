@@ -8,9 +8,9 @@ This is not legal advice. It is the checklist a Play submission would have to me
 
 Play's Accessibility API policy says the API is not for an app that autonomously initiates, plans, and executes actions. An assistant that taps and types is close to that description. Reviewers have accepted supervised remote-control apps (the user is present, a persistent notice is showing, the user can stop the session). They do not have to accept an agent product. Treat approval as uncertain.
 
-## Do not set `isAccessibilityTool`
+## `isAccessibilityTool` is false
 
-That flag is only for apps whose core purpose is helping people with disabilities. Assistants and automation tools are called out as not qualifying. This project does not set the flag. Setting it to skip the restricted-settings step would be a policy violation.
+That flag is only for apps whose core purpose is helping people with disabilities. Assistants and automation tools are called out as not qualifying. `pony_accessibility.xml` sets `android:isAccessibilityTool="false"`. Setting it to true to skip the restricted-settings step would be a policy violation. On Android 13+ the owner still has to allow restricted settings before turning Pony control on. Banking and OTP apps can hide `accessibilityDataSensitive` content from this service.
 
 ## What a submission would need
 

@@ -9,7 +9,7 @@ The agent never needs a vendor SDK. Pony shares the screen, reads the UI tree, a
 - **Site:** [pony.karlmagendavid.com](https://pony.karlmagendavid.com)
 - **APK:** [pony-latest.apk](https://github.com/oroplex/pony/releases/latest/download/pony-latest.apk), the signed APK for the current release. Signed APKs are published on [GitHub Releases](https://github.com/oroplex/pony/releases/latest). [latest.json](https://download.pony.karlmagendavid.com/latest.json) lists the current signed version and its SHA-256.
 - **Code:** [github.com/oroplex/pony](https://github.com/oroplex/pony)
-- **This tree:** 0.6.4 (versionCode 11), MIT licensed
+- **This tree:** 0.6.5 (versionCode 12), MIT licensed
 
 ## What it is
 
@@ -54,7 +54,7 @@ Distribution is a sideloaded APK, not Google Play. See [PLAY_POLICY.md](PLAY_POL
 
 ## Pair a brain
 
-A key on the phone needs no pairing. For an MCP host or Grok Bot, the quickest way to pair is a one-tap `https://download.pony.karlmagendavid.com/pair…` link: open it on the phone and it hands the pairing to Pony. The QR is the fallback when the link is on another screen: scan it (**Scan code** on Pony's pairing screen), or paste the link (**Paste link**). Either way, compare the six-digit safety code on both sides, tap **It matches**, and accept screen sharing (**Share entire screen**). A pairing token lasts 15 minutes.
+A key on the phone needs no pairing. For an MCP host or Grok Bot, the quickest way to pair is a one-tap `https://download.pony.karlmagendavid.com/pair…` link: open it on the phone and it hands the pairing to Pony. The QR is the fallback when the link is on another screen: scan it (**Scan code** on Pony's pairing screen), or paste the link (**Paste link**). Either way, compare the six-digit safety code on both sides, tap **It matches**, and accept screen sharing (**Share entire screen**). A pairing token lasts 15 minutes. Screen sharing and commands stay off until you tap **It matches**.
 
 **Your own key (no computer)**
 
@@ -68,7 +68,7 @@ A key on the phone needs no pairing. For an MCP host or Grok Bot, the quickest w
 2. Ask the assistant to pair. It calls `pair`, which returns the one-tap link (`pairPageLink`), a `pony://pair` link, and a QR image.
 3. Open the link on the phone, or scan the QR. Compare the safety code, tap **It matches**, and share the screen.
 
-In listen mode the server remembers the pairing (`~/.pony/mcp.json`) and rejoins on start.
+In listen mode the server remembers the pairing (`~/.pony/mcp.json`, encrypted, mode `600`) and rejoins on start.
 
 **Grok Bot**
 
@@ -106,6 +106,10 @@ Copy [`.env.example`](.env.example) if you want a documented list of overrides (
 Screen tools take optional `background` and `display` (`main` or `background`). Omit both to follow the phone. Password fields are shown as `[password]` and refused for typing. The action log stores character counts, never the text.
 
 In listen mode a standing `wait_for_request` stays open while the assistant is active, so asks typed or spoken on the phone are not lost between tool calls. `done` reports a one-sentence result.
+
+## Security preview
+
+0.6.5 is a security release. Pairing links keep their secrets in the URL fragment. **It matches** is a real gate: the assistant cannot see the screen or act until you confirm the six-digit code on the phone. Send, pay, delete, and call checks run on every tap, press, swipe, drag, and long-press. The MCP connector refuses acting tools until that confirmation arrives. Saved pairings (`~/.pony/mcp.json`) are encrypted and written mode `600`. Report vulnerabilities privately — see [SECURITY.md](SECURITY.md).
 
 ## Safety
 

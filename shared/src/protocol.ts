@@ -1,11 +1,16 @@
-/** Wire protocol for Pony Companion v1. Keep in sync with the Kotlin `proto` package. */
+/** Wire protocol for Pony Companion. Keep in sync with the Kotlin `proto` package. */
 
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 2;
+/** Oldest pairing payload this tree still accepts (0.6.4 and earlier). */
+export const MIN_SUPPORTED_PROTOCOL = 1;
+/** Shown when the other side is too old for this protocol. */
+export const UPDATE_PONY = "Please update Pony to 0.6.5 or later.";
 /** How long a pairing token stays valid after it's shown. Raised to 15 minutes so there's time to scan. */
 export const PAIRING_TTL_MS = 15 * 60 * 1000;
 export const SESSION_TTL_MS = 30 * 60 * 1000;
 export const HKDF_INFO = "pony-companion-v1";
 export const AEAD_AAD = "pony-v1";
+export const AEAD_AAD_V2 = "pony-v2";
 export const SAFETY_INFO = "pony-safety";
 /**
  * Default long-poll window for `wait_for_request`. Kept short so a missed reply
@@ -22,7 +27,7 @@ export const DEFAULT_PAIR_PAGE = "https://download.pony.karlmagendavid.com/pair.
 export type Role = "bot" | "phone";
 
 export interface PairingPayload {
-  v: typeof PROTOCOL_VERSION;
+  v: number;
   relay: string;
   token: string;
   pk: string;
@@ -68,13 +73,14 @@ export type CommandOp =
   | "confirm"
   | "done"
   | "info"
-  | "cancel";
+  | "cancel"
+  | "confirmed";
 
 export type PressKey = "back" | "home" | "recents" | "enter" | "search" | "go" | "send" | "next" | "done";
 
 /**
- * `type` inserts at the caret by default (it replaces only the current selection).
- * Pass `mode: "replace"` to overwrite the whole field, or `mode: "append"` to add at the end.
+ * `type` replaces the whole field by default. Pass `mode: "insert"` to type at the
+ * caret, or `mode: "append"` to add at the end.
  * The phone replies with result.method: `ime` (Pony keyboard), `set_text`, `paste`, or `key_events`.
  * `paste` happens only when the owner opted in. `key_events` is a last resort and includes result.warn.
  * Password fields return error `password_field`. `ime_disabled` and `ime_required` mean the Pony keyboard is not ready.
@@ -96,7 +102,7 @@ export interface CommandParams {
   /** For `pinch`: how far apart the two fingers end, in pixels. Larger than `fromDistance` zooms in. */
   toDistance?: number;
   text?: string;
-  /** For `type`: insert at the caret (default), replace the whole field, or append at the end. */
+  /** For `type`: replace the whole field (default), insert at the caret, or append at the end. */
   mode?: "insert" | "replace" | "append";
   /**
    * When the connector sent this command (unix ms). The phone drops it once
@@ -168,11 +174,13 @@ export interface EndedEvent {
 export interface AppMessage {
   id: string;
   kind: "req" | "res" | "evt";
-  op?: CommandOp | "progress" | "ended";
+  op?: CommandOp | "progress" | "ended" | "confirmed";
   params?: CommandParams;
   ok?: boolean;
   error?: string;
   result?: Record<string, unknown>;
+  /** Bound into the v2 AEAD AAD. Omitted on protocol v1 frames. */
+  seq?: number;
 }
 
 export function encodePairing(payload: PairingPayload): string {
@@ -191,7 +199,16 @@ export function pairingLink(payload: PairingPayload, client?: string): string {
  * same fields as {@link pairingLink}, so either link pairs the same session.
  */
 export function pairPageLink(payload: PairingPayload, client?: string, base: string = DEFAULT_PAIR_PAGE): string {
-  return `${base}?${pairingQuery(payload, client)}`;
+  const trimmed = base.trim();
+  const hash = pairingQuery(payload, client);
+  try {
+    const url = new URL(trimmed);
+    url.hash = hash;
+    return url.toString();
+  } catch {
+    const without = trimmed.replace(/#.*$/, "").replace(/\?.*$/, "");
+    return `${without}#${hash}`;
+  }
 }
 
 function pairingQuery(payload: PairingPayload, client?: string): string {
@@ -280,8 +297,11 @@ export function parseHttpPairLink(raw: string): PairingPayload {
 
 export function parsePairing(raw: string): PairingPayload {
   const parsed = JSON.parse(raw) as Partial<PairingPayload>;
-  if (parsed.v !== PROTOCOL_VERSION) {
+  if (typeof parsed.v !== "number" || !Number.isInteger(parsed.v) || parsed.v < MIN_SUPPORTED_PROTOCOL) {
     throw new Error("unsupported pairing version");
+  }
+  if (parsed.v > PROTOCOL_VERSION) {
+    throw new Error(UPDATE_PONY);
   }
   if (!parsed.relay || !parsed.token || !parsed.pk) {
     throw new Error("pairing payload missing relay, token, or pk");
@@ -290,11 +310,16 @@ export function parsePairing(raw: string): PairingPayload {
     throw new Error("pairing token must be 32 bytes hex");
   }
   return {
-    v: PROTOCOL_VERSION,
+    v: parsed.v,
     relay: parsed.relay,
     token: parsed.token.toLowerCase(),
     pk: parsed.pk,
   };
+}
+
+/** True when this pairing / handshake uses v2 AEAD counters. */
+export function usesReplayProtection(version: number | undefined | null): boolean {
+  return (version ?? 0) >= 2;
 }
 
 export function newMessageId(): string {

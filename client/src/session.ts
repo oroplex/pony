@@ -11,7 +11,9 @@ import {
   actionTtlMs,
   b64urlDecode,
   b64urlEncode,
-  decryptJson,
+  DirectionCounter,
+  UPDATE_PONY,
+  decryptJsonFrame,
   deriveSessionKeys,
   encodePairing,
   encryptJson,
@@ -19,6 +21,7 @@ import {
   newMessageId,
   parsePairing,
   relayWsOrigin,
+  usesReplayProtection,
   type SessionKeys,
   formatSafetyCode,
 } from "@pony/shared";
@@ -84,10 +87,10 @@ export interface LinkStatus {
   resumed: boolean;
 }
 
-/** Everything a bot needs to rejoin its session after a restart. Holds a private key. Store it 0600. */
+/** Everything a side needs to rejoin its session after a restart. Holds a private key. Store it 0600. */
 export interface SavedSession {
   v: 1;
-  role: "bot";
+  role: "bot" | "phone";
   payload: PairingPayload;
   socketUrl: string;
   privateKey: string;
@@ -96,6 +99,10 @@ export interface SavedSession {
   peerKey: string;
   clientName?: string;
   pairedAt: number;
+  ownerConfirmed?: boolean;
+  /** Last per-direction AEAD counters. Restored so a restart does not rewind seq. */
+  sendSeq?: number;
+  recvSeq?: number;
 }
 
 interface Pending {
@@ -151,6 +158,8 @@ export class PonySession {
   readonly publicKey: Uint8Array;
   readonly clientName?: string;
   keys?: SessionKeys;
+  ownerConfirmed = false;
+  protocolTooOld = false;
   onRequest?: (msg: AppMessage) => Promise<CommandResult> | CommandResult;
   onEvent?: (msg: AppMessage) => void;
   onProgress?: (event: ProgressEvent) => void;
@@ -172,6 +181,8 @@ export class PonySession {
   private readonly listeners = new Set<(status: LinkStatus) => void>();
   private readonly reconnect: Required<ReconnectOptions> | null;
   private status: LinkStatus = { state: "connecting", attempt: 0, resumed: false };
+  private readonly sendCounter = new DirectionCounter();
+  private readonly recvCounter = new DirectionCounter();
 
   private constructor(
     role: "bot" | "phone",
@@ -239,19 +250,38 @@ export class PonySession {
     saved: SavedSession,
     opts: { socketUrl?: string; reconnect?: ReconnectOptions | false } = {},
   ): PonySession {
-    const checked = checkSaved(saved);
+    return PonySession.resumeSaved(saved, "bot", opts);
+  }
+
+  /** Phone-side Reconnect: same keys and confirmation as the vault on the device. */
+  static resumePhone(
+    saved: SavedSession,
+    opts: { socketUrl?: string; reconnect?: ReconnectOptions | false } = {},
+  ): PonySession {
+    return PonySession.resumeSaved(saved, "phone", opts);
+  }
+
+  private static resumeSaved(
+    saved: SavedSession,
+    role: "bot" | "phone",
+    opts: { socketUrl?: string; reconnect?: ReconnectOptions | false },
+  ): PonySession {
+    const checked = checkSaved(saved, role);
     const privateKey = b64urlDecode(checked.privateKey);
     const session = new PonySession(
-      "bot",
+      role,
       checked.payload,
       privateKey,
       b64urlDecode(checked.publicKey),
       checked.clientName,
       opts.reconnect,
     );
-    session.keys = deriveSessionKeys(privateKey, b64urlDecode(checked.peerKey), checked.payload.token, "bot");
+    session.keys = deriveSessionKeys(privateKey, b64urlDecode(checked.peerKey), checked.payload.token, role);
     session.peerKey = checked.peerKey;
     session.pairedAt = checked.pairedAt;
+    session.ownerConfirmed = checked.ownerConfirmed === true;
+    session.sendCounter.restore(checked.sendSeq ?? 0, 0);
+    session.recvCounter.restore(0, checked.recvSeq ?? 0);
     session.established = true;
     session.wsUrl = socketPath(opts.socketUrl ?? checked.socketUrl);
     session.dial().catch(() => undefined);
@@ -294,14 +324,14 @@ export class PonySession {
     return formatSafetyCode(this.keys.safetyCode);
   }
 
-  /** The bot's side of a finished pairing, for [resumeBot]. */
+  /** This side of a finished pairing, for [resumeBot] / [resumePhone]. */
   save(): SavedSession {
-    if (this.role !== "bot" || !this.keys || !this.peerKey) {
+    if (!this.keys || !this.peerKey) {
       throw new Error("nothing to save until the phone finishes pairing");
     }
     return {
       v: 1,
-      role: "bot",
+      role: this.role,
       payload: this.payload,
       socketUrl: this.wsUrl,
       privateKey: b64urlEncode(this.privateKey),
@@ -309,6 +339,9 @@ export class PonySession {
       peerKey: this.peerKey,
       ...(this.clientName ? { clientName: this.clientName } : {}),
       pairedAt: this.pairedAt ?? Date.now(),
+      ownerConfirmed: this.ownerConfirmed,
+      sendSeq: this.sendCounter.snapshot().send,
+      recvSeq: this.recvCounter.snapshot().recv,
     };
   }
 
@@ -483,8 +516,15 @@ export class PonySession {
   private sendEncrypted(msg: AppMessage): boolean {
     const ws = this.ws;
     if (!this.keys || !ws || ws.readyState !== WebSocket.OPEN) return false;
-    ws.send(JSON.stringify({ type: "fwd", data: encryptJson(this.keys.send, msg) }));
+    const seq = usesReplayProtection(this.payload.v) ? this.sendCounter.nextSend() : undefined;
+    const body = seq != null ? { ...msg, seq } : msg;
+    ws.send(JSON.stringify({ type: "fwd", data: encryptJson(this.keys.send, body, seq) }));
     return true;
+  }
+
+  confirmOwner(): void {
+    this.ownerConfirmed = true;
+    this.sendEvent("confirmed", { confirmed: true, v: this.payload.v });
   }
 
   private sendRaw(ws: WebSocket, body: unknown): void {
@@ -565,7 +605,7 @@ export class PonySession {
         if (this.role === "phone") {
           this.sendRaw(ws, {
             type: "fwd",
-            data: JSON.stringify({ type: "hs", pk: b64urlEncode(this.publicKey) }),
+            data: JSON.stringify({ type: "hs", pk: b64urlEncode(this.publicKey), v: this.payload.v }),
           });
         }
         if (this.keys) {
@@ -653,8 +693,23 @@ export class PonySession {
 
     let msg: AppMessage;
     try {
-      msg = decryptJson<AppMessage>(this.keys.recv, data);
+      const opened = decryptJsonFrame<AppMessage | { type?: string; client?: string }>(
+        this.keys.recv,
+        data,
+        this.payload.v,
+      );
+      if (usesReplayProtection(this.payload.v) && !this.recvCounter.accept(opened.seq)) return;
+      const value = opened.value;
+      if (value && typeof value === "object" && "type" in value && value.type === "intro") {
+        return;
+      }
+      msg = value as AppMessage;
     } catch {
+      return;
+    }
+    if (msg.kind === "evt" && msg.op === "confirmed") {
+      this.ownerConfirmed = true;
+      this.onEvent?.(msg);
       return;
     }
 
@@ -697,13 +752,18 @@ export class PonySession {
 
   private onPlainFrame(ws: WebSocket, data: string): void {
     if (this.role !== "bot") return;
-    let frame: { type?: string; pk?: string };
+    let frame: { type?: string; pk?: string; v?: number };
     try {
-      frame = JSON.parse(data) as { type?: string; pk?: string };
+      frame = JSON.parse(data) as { type?: string; pk?: string; v?: number };
     } catch {
       return;
     }
     if (frame.type !== "hs" || typeof frame.pk !== "string") return;
+    const phoneVersion = typeof frame.v === "number" ? frame.v : 1;
+    if (phoneVersion < 2) {
+      this.protocolTooOld = true;
+      this.setState(this.status.state, { reason: UPDATE_PONY });
+    }
     if (!this.keys) {
       this.keys = deriveSessionKeys(this.privateKey, b64urlDecode(frame.pk), this.payload.token, "bot");
       this.peerKey = frame.pk;
@@ -712,10 +772,20 @@ export class PonySession {
       this.setState(this.status.state, { reason: "peer_key_changed" });
       return;
     }
-    if (this.clientName) {
-      this.sendRaw(ws, { type: "fwd", data: JSON.stringify({ type: "intro", client: this.clientName }) });
+    if (this.clientName && this.keys) {
+      try {
+        const seq = usesReplayProtection(this.payload.v) ? this.sendCounter.nextSend() : undefined;
+        ws.send(
+          JSON.stringify({
+            type: "fwd",
+            data: encryptJson(this.keys.send, { type: "intro", client: this.clientName }, seq),
+          }),
+        );
+      } catch {
+        /* name is cosmetic; the session is still ready */
+      }
     }
-    this.setState("ready", { reason: undefined });
+    this.setState("ready", { reason: this.protocolTooOld ? UPDATE_PONY : undefined });
   }
 
   private onPhoneProgress(event: ProgressEvent): void {
@@ -739,8 +809,8 @@ function socketPath(url: string): string {
   return `${origin}/ws`;
 }
 
-function checkSaved(saved: SavedSession): SavedSession {
-  if (!saved || saved.v !== 1 || saved.role !== "bot") throw new Error("not a saved Pony session");
+function checkSaved(saved: SavedSession, role: "bot" | "phone" = "bot"): SavedSession {
+  if (!saved || saved.v !== 1 || saved.role !== role) throw new Error("not a saved Pony session");
   const payload = parsePairing(JSON.stringify(saved.payload));
   for (const field of ["socketUrl", "privateKey", "publicKey", "peerKey"] as const) {
     if (typeof saved[field] !== "string" || !saved[field]) throw new Error(`saved session is missing ${field}`);

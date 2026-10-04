@@ -56,6 +56,10 @@ export interface PhoneStatus {
   ime: ImeStatusInfo | null;
   imeCurrent: string | null;
   ponyKeyboardUsable: boolean | null;
+  /** The owner tapped It matches on the phone. Acting tools stay dark until this is true. */
+  ownerConfirmed: boolean;
+  /** Set when the phone is too old for this protocol. */
+  updateRequired: string | null;
 }
 
 export interface ImeStatusInfo {
@@ -133,6 +137,7 @@ export class PhoneController {
   readonly log: ActionLogEntry[] = [];
   private phoneIme: ImeStatusInfo | null = null;
   private lastScreenPkg?: string;
+  private ownerConfirmed = false;
 
   constructor(private readonly options: ControllerOptions) {
     this.relayHttp = options.relayHttp.replace(/\/$/, "");
@@ -184,6 +189,8 @@ export class PhoneController {
       ime: this.phoneIme,
       imeCurrent: this.phoneIme?.current ?? null,
       ponyKeyboardUsable: this.phoneIme?.ponyUsable ?? null,
+      ownerConfirmed: this.ownerConfirmed || Boolean(session?.ownerConfirmed),
+      updateRequired: session?.protocolTooOld ? "Please update Pony to 0.6.5 or later." : null,
     };
   }
 
@@ -282,7 +289,7 @@ export class PhoneController {
     opts?: DisplayOpts & { mode?: "insert" | "replace" | "append" },
     req?: RequestOptions,
   ): Promise<CommandResult> {
-    const base = opts?.mode ? { text, mode: opts.mode } : { text };
+    const base = { text, mode: opts?.mode ?? "replace" };
     return this.command("type", withDisplay(base, opts), 45_000, req);
   }
 
@@ -404,6 +411,13 @@ export class PhoneController {
 
   /** Leaves the relay without ending the session. With a state file, the next start rejoins it. */
   detach(): void {
+    if (this.store && this.session?.keys) {
+      try {
+        this.store.save(this.session.save());
+      } catch {
+        /* next start may have to pair again */
+      }
+    }
     this.disposeListener();
     this.releaseWaiters();
     this.unsubscribe?.();
@@ -432,6 +446,12 @@ export class PhoneController {
     this.attend();
     this.ensureLive();
     const session = this.session!;
+    if (session.protocolTooOld) {
+      return { ok: false, error: "Please update Pony to 0.6.5 or later." };
+    }
+    if (needsConfirm(op) && !this.isConfirmed()) {
+      return { ok: false, error: "not_confirmed" };
+    }
     const result = await session.request(op, params, timeoutMs, req);
     this.rememberScreen(result);
     this.append(op, describe(op, params, result), result.ok);
@@ -442,6 +462,10 @@ export class PhoneController {
       throw new Error(endedMessage(link.reason ?? "ended", link.endedBy));
     }
     return result;
+  }
+
+  private isConfirmed(): boolean {
+    return this.ownerConfirmed || Boolean(this.session?.ownerConfirmed);
   }
 
   private ensureLive(): void {
@@ -508,6 +532,20 @@ export class PhoneController {
     this.session = session;
     this.connectedAt = null;
     this.phoneEndsAt = undefined;
+    this.ownerConfirmed = session.ownerConfirmed;
+    session.onEvent = (msg) => {
+      if (msg.op === "confirmed") {
+        this.ownerConfirmed = true;
+        session.ownerConfirmed = true;
+        if (this.store && session.keys) {
+          try {
+            this.store.save(session.save());
+          } catch {
+            /* session still works */
+          }
+        }
+      }
+    };
     const onChange = () => {
       if (this.session !== session) return;
       const link = session.link();
@@ -756,6 +794,12 @@ export function endedMessage(reason: string, endedBy?: string): string {
     default:
       return `The session ended (${reason}). Call pair to connect again.`;
   }
+}
+
+const OPEN_UNTIL_CONFIRMED = new Set(["wait_for_request", "disconnect", "info", "ping", "done"]);
+
+function needsConfirm(op: CommandOp): boolean {
+  return !OPEN_UNTIL_CONFIRMED.has(op);
 }
 
 function describe(op: string, params: CommandParams, result: CommandResult): string {

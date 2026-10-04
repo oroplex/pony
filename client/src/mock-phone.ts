@@ -85,7 +85,7 @@ export class MockPhone {
           ok: true,
           result: {
             app: "Pony Companion (mock)",
-            version: "0.6.4",
+            version: "0.6.5",
             features: ["resume", "tasks", "done", "deferral", "cover_check", "listen", "action_ttl"],
             sessionEndsAt: this.sessionEndsAt,
             now: Date.now(),
@@ -153,7 +153,7 @@ export class MockPhone {
           p.mode === "append" ? (this.lastTyped ?? "") + (p.text ?? "") : p.text;
         return {
           ok: true,
-          result: { length: p.text?.length ?? 0, method: "set_text", mode: p.mode ?? "insert", ...place(p) },
+          result: { length: p.text?.length ?? 0, method: "set_text", mode: p.mode ?? "replace", ...place(p) },
         };
       case "press":
         return { ok: true, result: { key: p.key, ...place(p) } };

@@ -631,17 +631,21 @@ class PonyAccessibilityService : AccessibilityService() {
                 if (!bounds.contains(x.toInt(), y.toInt())) return
                 val area = bounds.width() * bounds.height()
                 if (TextEntry.isPasswordField(node.isPassword, node.inputType) && area in 1 until Int.MAX_VALUE) password = true
-                val text = sequenceOf(node.text, node.contentDescription, node.hintText)
-                    .mapNotNull { it?.toString()?.trim() }
-                    .firstOrNull { it.isNotEmpty() }
-                if (text != null && (node.isClickable || node.isEditable || node.isFocusable) && area in 1 until bestArea) {
+                val visible = node.text?.toString()?.trim().orEmpty()
+                val desc = node.contentDescription?.toString()?.trim().orEmpty()
+                val hint = node.hintText?.toString()?.trim().orEmpty()
+                val text = sequenceOf(visible, desc, hint).firstOrNull { it.isNotEmpty() }
+                if ((text != null || node.isClickable) && (node.isClickable || node.isEditable || node.isFocusable) && area in 1 until bestArea) {
                     val pkg = node.packageName?.toString()
+                    val password = TextEntry.isPasswordField(node.isPassword, node.inputType)
                     best = TapTarget(
-                        label = if (TextEntry.isPasswordField(node.isPassword, node.inputType)) "" else text,
-                        isPassword = TextEntry.isPasswordField(node.isPassword, node.inputType),
+                        label = if (password) "" else visible.ifBlank { desc.ifBlank { hint } },
+                        isPassword = password,
                         packageName = pkg,
                         appLabel = pkg?.let { appLabel(it) },
                         viewId = node.viewIdResourceName,
+                        contentDescription = desc.takeIf { it.isNotEmpty() && it != visible },
+                        className = node.className?.toString(),
                     )
                     bestArea = area
                 }

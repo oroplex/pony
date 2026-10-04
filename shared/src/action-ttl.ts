@@ -8,8 +8,9 @@ export const ACTION_TTL_IDLE_MS = 20_000;
 export const OWNER_PROMPT_MS = 60_000;
 /** Connector wait: longer than the phone prompt so a late "no" is never a timeout. */
 export const OWNER_CLIENT_WAIT_MS = 70_000;
-/** Ignore a client issuedAt that is more than this far from receive time (clock skew). */
+/** Reject a client issuedAt that is more than this far from receive time (clock skew). */
 export const ACTION_CLOCK_SKEW_MS = 120_000;
+export const CLOCK_SKEW = "clock_skew";
 
 const TTL_BY_OP: Record<string, number> = {
   tap: ACTION_TTL_DEFAULT_MS,
@@ -39,14 +40,28 @@ export function actionTtlMs(op: string | undefined | null): number {
   return TTL_BY_OP[op] ?? ACTION_TTL_DEFAULT_MS;
 }
 
+export type IssuedAtResult = { ok: true; issuedAt: number } | { ok: false; error: typeof CLOCK_SKEW };
+
 /**
- * When the client didn't stamp the command, the phone uses the receive time
- * so a command that sat in its queue still expires.
+ * Prefer the client's stamp when it is close to receive time. A missing stamp
+ * uses the receive time so a queued command still expires. A wildly skewed
+ * stamp is rejected — it is never restamped to now.
  */
+export function resolveIssuedAt(clientIssuedAt: number | undefined | null, receivedAt: number): IssuedAtResult {
+  if (clientIssuedAt == null || !Number.isFinite(clientIssuedAt) || clientIssuedAt <= 0) {
+    return { ok: true, issuedAt: receivedAt };
+  }
+  if (Math.abs(clientIssuedAt - receivedAt) > ACTION_CLOCK_SKEW_MS) {
+    return { ok: false, error: CLOCK_SKEW };
+  }
+  return { ok: true, issuedAt: clientIssuedAt };
+}
+
+/** @deprecated Use {@link resolveIssuedAt}. Missing stamps still fall back; skewed stamps throw. */
 export function effectiveIssuedAt(clientIssuedAt: number | undefined | null, receivedAt: number): number {
-  if (clientIssuedAt == null || !Number.isFinite(clientIssuedAt) || clientIssuedAt <= 0) return receivedAt;
-  if (Math.abs(clientIssuedAt - receivedAt) > ACTION_CLOCK_SKEW_MS) return receivedAt;
-  return clientIssuedAt;
+  const resolved = resolveIssuedAt(clientIssuedAt, receivedAt);
+  if (!resolved.ok) throw new Error(CLOCK_SKEW);
+  return resolved.issuedAt;
 }
 
 export function actionExpired(

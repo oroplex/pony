@@ -14,6 +14,7 @@ import {
   publicKeyFromPrivate,
   safetyCode,
   tokenBytes,
+  decryptJsonFrame,
 } from "./crypto.ts";
 import { hexToBytes } from "@noble/hashes/utils.js";
 
@@ -94,5 +95,19 @@ describe("session crypto", () => {
       "000102030405060708090a0b57a09489a72c3378ec0d8d0a285cf843d8e6d5c6a759091f6816e43040",
     );
     expect(new TextDecoder().decode(decrypt(bob.recv, frame))).toBe('{"op":"ping"}');
+  });
+
+  it("binds a per-direction seq into the v2 AAD and prefixes it on the frame", () => {
+    const bot = generateKeyPair();
+    const phone = generateKeyPair();
+    const token = "aa".repeat(32);
+    const botKeys = deriveSessionKeys(bot.privateKey, phone.publicKey, token, "bot");
+    const phoneKeys = deriveSessionKeys(phone.privateKey, bot.publicKey, token, "phone");
+    const frame = encryptJson(botKeys.send, { op: "tap" }, 7);
+    const { value, seq } = decryptJsonFrame<{ op: string }>(phoneKeys.recv, frame, 2);
+    expect(value).toEqual({ op: "tap" });
+    expect(seq).toBe(7);
+    expect(() => decryptJson(phoneKeys.recv, frame)).toThrow();
+    expect(() => decryptJson(phoneKeys.recv, frame, 8)).toThrow();
   });
 });

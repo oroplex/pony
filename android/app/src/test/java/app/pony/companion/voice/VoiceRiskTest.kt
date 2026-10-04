@@ -22,8 +22,18 @@ class VoiceRiskTest {
         assertNull(VoiceRisk.promptFor("tap", "What are you looking for?"))
         assertNull(VoiceRisk.promptFor("tap", "Recall"))
         assertNull(VoiceRisk.promptFor("tap", "Display"))
+        assertNull(VoiceRisk.promptFor("swipe", "Recall"))
+        assertNull(VoiceRisk.promptFor("press", "Display"))
+        assertNull(VoiceRisk.promptFor("long_press", "What are you looking for?"))
+        // Type itself is not an acting verb; type-then-submit is press.
         assertNull(VoiceRisk.promptFor("type", "Send"))
-        assertNull(VoiceRisk.promptFor("swipe", "Delete"))
+        // Risky labels prompt on every acting verb.
+        assertEquals("Delete this?", VoiceRisk.promptFor("swipe", "Delete"))
+        assertEquals("Delete this?", VoiceRisk.promptFor("press", "Delete"))
+        assertEquals("Delete this?", VoiceRisk.promptFor("long_press", "Delete"))
+        assertEquals("Send this?", VoiceRisk.promptFor("swipe", "Send"))
+        assertEquals("Send this?", VoiceRisk.promptFor("press", "Send"))
+        assertEquals("Send this?", VoiceRisk.promptFor("long_press", "Send"))
     }
 
     @Test

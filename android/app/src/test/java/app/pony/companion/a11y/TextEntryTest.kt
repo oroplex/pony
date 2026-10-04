@@ -38,8 +38,8 @@ class TextEntryTest {
     }
 
     @Test
-    fun parseModeDefaultsToInsert() {
-        assertEquals(TypeMode.INSERT, TextEntry.parseMode(null, false))
+    fun parseModeDefaultsToReplace() {
+        assertEquals(TypeMode.REPLACE, TextEntry.parseMode(null, false))
         assertEquals(TypeMode.INSERT, TextEntry.parseMode("insert", false))
         assertEquals(TypeMode.REPLACE, TextEntry.parseMode("replace", false))
         assertEquals(TypeMode.APPEND, TextEntry.parseMode("append", false))
